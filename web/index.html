@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1216" />
+  <title>PiEYE</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icons/icon.svg" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="appbar">
+    <div class="brand">
+      <span class="logo">◉</span>
+      <span>PiEYE</span>
+    </div>
+    <div class="status" id="status">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">connecting…</span>
+    </div>
+  </header>
+
+  <main id="view"><!-- rendered by app.js --></main>
+
+  <nav class="tabbar">
+    <a href="#live"     data-tab="live">    <span class="ico">▦</span>Live</a>
+    <a href="#events"   data-tab="events">  <span class="ico">◷</span>Events</a>
+    <a href="#settings" data-tab="settings"><span class="ico">⚙</span>Settings</a>
+  </nav>
+
+  <div class="modal" id="modal" hidden>
+    <div class="modal-body">
+      <button class="modal-close" id="modalClose">✕</button>
+      <div id="modalContent"></div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

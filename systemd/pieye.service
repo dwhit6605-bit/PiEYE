@@ -1,0 +1,20 @@
+# Reference unit only. install.sh generates the real one at
+# /etc/systemd/system/pieye.service with your actual user and install path
+# filled in for __USER__ and __DIR__ -- you normally don't edit this by hand.
+[Unit]
+Description=PiEYE security-vision monitor + web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStart=__DIR__/.venv/bin/python -m vision.server --config __DIR__/config.yaml
+Restart=on-failure
+RestartSec=5
+# Only needed if claude.enabled is true. Keep the key out of the unit:
+# EnvironmentFile=__DIR__/.env
+
+[Install]
+WantedBy=multi-user.target

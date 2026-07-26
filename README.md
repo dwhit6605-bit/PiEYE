@@ -1,0 +1,120 @@
+# PiEYE
+
+A privacy-first security-camera monitor for a Raspberry Pi 4 + UVC (USB) webcams.
+Runs **100% offline** by default; the cloud Claude description tier is optional.
+
+## Quick start (one line on the Pi)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dwhit6605-bit/PiEYE/main/install.sh | bash
+```
+
+That clones PiEYE to `~/PiEYE`, installs everything, generates a `systemd` service
+for your user, and starts it. When it finishes it prints the URL to open. Options:
+
+```bash
+PIEYE_LITE=1 curl -fsSL .../install.sh | bash     # motion-only, skip torch (2 GB Pis)
+```
+
+Re-run `~/PiEYE/install.sh` any time to update (it `git pull`s and reinstalls).
+
+## Pipeline
+
+```
+UVC cam ─► motion detection (OpenCV, free) ─► local YOLO detection (offline) ─► ntfy push + snapshot
+                                                                            ├─ [optional] Claude one-line description
+                                                                            └─ SQLite event history + web UI (PWA)
+```
+
+Motion detection is essentially free, so it inspects every frame and only wakes the
+heavier object detector when something moves. YOLO then confirms *what* it is
+(person / car / dog / …) before anything pings your phone — so you get "person at
+front-door" instead of "a shadow moved."
+
+## Web app (PWA)
+
+`vision.server` runs the monitor in the background **and** serves a phone-installable
+web app at `http://<pi-ip>:8080`:
+
+- **Live** — smooth **MJPEG** stream from each camera (the monitor only ramps to full
+  frame rate while a Live view is actually open, so it stays light on the Pi)
+- **Events** — searchable history with the saved annotated snapshot, description,
+  labels and confidence; tap for full image; delete individual events
+- **Settings** — edit the *entire* config from the browser (cameras, motion
+  sensitivity, detection backend/classes, ntfy, Claude toggle, retention). Saving
+  writes `config.yaml` and hot-reloads the monitor — no SSH, no restart
+
+Open it in mobile Chrome/Safari and "Add to Home Screen" to install it as a standalone
+app. Events persist to SQLite (`data/events.db`) with snapshots under `data/snapshots/`,
+auto-pruned by `storage.retention_days` / `storage.max_events`.
+
+### Login
+
+The UI is open by default (fine on a trusted LAN / over WireGuard). To require a
+username + password, run this once on the Pi and restart the service:
+
+```bash
+cd ~/PiEYE && source .venv/bin/activate
+python -m vision.set_password           # prompts for username + password
+sudo systemctl restart pieye.service
+```
+
+This stores a salted **PBKDF2** password hash and an auto-generated session-signing
+secret in `config.yaml` (never plaintext). Logging in sets an HttpOnly session cookie;
+"Sign out" is on the Settings tab. For scripts/automation you can instead set
+`server.auth_token` and send it as an `X-Auth-Token` header. Over plain HTTP the cookie
+isn't encrypted in transit — put the Pi behind the WireGuard tunnel (or a TLS reverse
+proxy) if you access it from outside your LAN.
+
+## Hardware
+
+- Raspberry Pi 4 (4 GB+ recommended if using YOLO; `backend: none` runs on anything)
+- One or more UVC webcams on USB
+- Phone with the [ntfy](https://ntfy.sh) app (free) subscribed to your topic
+
+## After install
+
+The one-line installer already set up and started the `pieye.service`. To finish:
+
+1. Open `http://<pi-ip>:8080`, and subscribe your phone's ntfy app to the
+   `notify.ntfy_topic` value (set your own unique topic in **Settings**).
+2. Walk in front of the camera — you should get a push with an annotated snapshot and
+   see the event in the **Events** tab.
+
+```bash
+journalctl -u pieye.service -f          # watch logs
+sudo systemctl restart pieye.service    # after editing config.yaml by hand
+```
+
+Manual / headless run (no service): `python -m vision.server --config config.yaml`,
+or without the web UI, `python -m vision.main --config config.yaml`.
+
+## Tuning
+
+| Symptom | Fix in `config.yaml` |
+|---|---|
+| Too many alerts | raise `motion.min_area`, raise `min_confidence_to_alert`, raise `cooldown_seconds` |
+| Missing events | lower `motion.threshold`, lower `motion.min_area` |
+| False object types | trim `classes_of_interest` |
+| No ML at all (lightest) | `detection.backend: none` (alerts on motion only, no torch needed) |
+
+## Optional: add Claude descriptions later
+
+No API key needed for everything above. When you want sentence-level descriptions
+("a delivery courier is leaving a box by the door") and package-type awareness that
+local COCO models lack:
+
+1. Get a key at console.anthropic.com
+2. `pip install anthropic`
+3. Put the key in an `.env` file next to the service and reference it via
+   `EnvironmentFile` in the unit (keep it out of git)
+4. Set `claude.enabled: true` in `config.yaml`
+
+Claude is still only called on confirmed detections, so spend stays tiny.
+
+## Remote viewing (GL.iNet)
+
+Alerts reach you anywhere already (ntfy goes over normal internet). To *view* the Pi
+remotely, enable the built-in **WireGuard server** in the GL-AR750's admin GUI, put
+the Pi on its LAN, and connect your phone's WireGuard client from away. The AR300M is
+a fine spare / travel unit for the same.

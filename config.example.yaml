@@ -1,0 +1,63 @@
+# Copy to config.yaml and edit. Nothing here needs the internet except:
+#   - the ONE-TIME YOLO weight download on first run
+#   - ntfy pushes
+#   - the optional Claude tier (off by default)
+
+cameras:
+  - id: front-door      # shows up in the alert title
+    source: 0           # /dev/video0 -> 0, /dev/video1 -> 1, or an "rtsp://..." URL
+    rotate: 0           # 0 / 90 / 180 / 270 if the cam is mounted rotated
+  # - id: back-yard
+  #   source: 1
+
+motion:
+  min_area: 3000        # px of change to count as motion. Raise if it's twitchy
+  threshold: 25         # per-pixel brightness delta. Lower = more sensitive
+  warmup_frames: 30     # ignore the first N frames while the camera settles
+
+detection:
+  backend: yolo         # "yolo" = local offline object detection, "none" = motion-only
+  model: yolo11n.pt     # nano model; auto-downloads once (~5 MB)
+  confidence: 0.45      # detector's own floor for keeping a box
+  cooldown_seconds: 60  # min gap between alerts per camera (stops alert spam)
+  classes_of_interest:  # only these trigger an alert (COCO labels)
+    - person
+    - car
+    - truck
+    - bus
+    - bicycle
+    - motorcycle
+    - dog
+    - cat
+
+notify:
+  ntfy_server: https://ntfy.sh
+  ntfy_topic: CHANGE-ME-to-something-long-and-random   # anyone who knows it can read your alerts
+  # ntfy_token: tk_xxx        # only if you self-host ntfy with auth
+  priority: high
+  min_confidence_to_alert: 0.5
+
+claude:
+  enabled: false        # flip to true once you have an API key for sentence-level descriptions
+  model: claude-haiku-4-5-20251001
+  # API key comes from the ANTHROPIC_API_KEY environment variable, NOT this file
+
+server:
+  host: 0.0.0.0         # 0.0.0.0 = reachable from other LAN devices
+  port: 8080            # open http://<pi-ip>:8080 ; changing this needs a service restart
+  live_fps: 10          # MJPEG stream frame rate while a Live view is open
+  auth_token: null      # optional MACHINE token (X-Auth-Token header) for scripts/automation
+  auth:                 # web-UI login. Don't hand-edit -- run: python -m vision.set_password
+    enabled: false
+    username: admin
+    password_hash: null # salted PBKDF2 hash, written by set_password
+    secret: null        # session-signing key, auto-generated when login is enabled
+    session_ttl_hours: 720
+
+storage:
+  db_path: data/events.db
+  snapshot_dir: data/snapshots
+  retention_days: 14    # auto-delete events + snapshots older than this
+  max_events: 5000      # hard cap on stored events
+
+loop_delay: 0.1         # seconds between capture cycles

@@ -1,0 +1,8 @@
+opencv-python-headless
+numpy
+pyyaml
+requests
+fastapi
+uvicorn[standard]
+ultralytics        # local YOLO object detection (pulls in torch). Omit if detection.backend: none
+# anthropic        # uncomment only if you enable the optional Claude description tier

@@ -1,0 +1,11 @@
+# runtime data (events DB + snapshots)
+data/
+# python
+.venv/
+__pycache__/
+*.pyc
+# local config + secrets (keep config.example.yaml)
+config.yaml
+.env
+# downloaded model weights
+*.pt
