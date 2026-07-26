@@ -1,0 +1,19 @@
+# PiEYE — public auto-HTTPS reverse proxy (Caddy).
+#
+# Use this only if you are intentionally exposing PiEYE to the internet:
+# ports 80 AND 443 must reach this host so Caddy can obtain a Let's Encrypt cert.
+# Prefer the private setups in docs/tls.md unless you really need public access.
+#
+#   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile   # edit the hostname first
+#   sudo systemctl restart caddy
+#
+# Remember to set in config.yaml:
+#   server.secure_cookies: true
+#   server.behind_proxy:   true
+
+pieye.example.com {
+    # flush_interval -1 streams the MJPEG live view without buffering
+    reverse_proxy 127.0.0.1:8080 {
+        flush_interval -1
+    }
+}

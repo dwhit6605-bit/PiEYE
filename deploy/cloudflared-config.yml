@@ -1,0 +1,23 @@
+# PiEYE — Cloudflare Tunnel (no open ports, TLS at Cloudflare's edge).
+#
+# Reaches PiEYE from anywhere without port-forwarding. Add Cloudflare Access
+# (Zero Trust) on the hostname for an SSO/email gate IN FRONT of PiEYE's own login.
+#
+# Setup:
+#   cloudflared tunnel login
+#   cloudflared tunnel create pieye
+#   cloudflared tunnel route dns pieye pieye.example.com
+#   # put this file at ~/.cloudflared/config.yml (fill in the IDs), then:
+#   cloudflared tunnel run pieye        # or: sudo cloudflared service install
+#
+# Cloudflare terminates TLS, so still set in config.yaml:
+#   server.secure_cookies: true
+#   server.behind_proxy:   true
+
+tunnel: <TUNNEL-ID>
+credentials-file: /home/<user>/.cloudflared/<TUNNEL-ID>.json
+
+ingress:
+  - hostname: pieye.example.com
+    service: http://localhost:8080
+  - service: http_status:404

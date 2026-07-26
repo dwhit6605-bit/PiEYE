@@ -24,12 +24,13 @@ for i in range(12):
 w.release()
 
 
-def write_cfg(name, auth=None):
+def write_cfg(name, auth=None, secure=False):
     cfg = {
         "cameras": [{"id": "testcam", "source": vid, "rotate": 0}],
         "detection": {"backend": "none"},
         "notify": {"ntfy_server": "https://ntfy.sh", "ntfy_topic": "pv-smoke-unique-123"},
-        "server": {"host": "127.0.0.1", "port": 8099, "auth_token": None, "live_fps": 10},
+        "server": {"host": "127.0.0.1", "port": 8099, "auth_token": None, "live_fps": 10,
+                   "secure_cookies": secure},
         "storage": {"db_path": "data/events.db", "snapshot_dir": "data/snaps"},
     }
     if auth:
@@ -60,6 +61,15 @@ assert vauth.verify_session(tok, "sk") == "admin"
 assert vauth.verify_session(tok, "different-secret") is None
 assert vauth.verify_session(vauth.make_session("admin", "sk", ttl_hours=-1), "sk") is None
 print("PASS  auth password hash + session sign/verify/expire")
+
+lim = vauth.LoginLimiter(max_attempts=3, lockout_seconds=60)
+assert lim.locked_for("k") == 0
+for _ in range(3):
+    lim.record_failure("k")
+assert lim.locked_for("k") > 0 and lim.locked_for("other") == 0
+lim.reset("k")
+assert lim.locked_for("k") == 0
+print("PASS  LoginLimiter locks after N failures, per-key, resettable")
 
 from vision.server import create_app  # noqa: E402
 
@@ -92,7 +102,8 @@ with TestClient(app) as c:
 # ---- auth-enabled app: login gating ----
 auth_cfg = {"enabled": True, "username": "dave",
             "password_hash": vauth.hash_password("hunter2"),
-            "secret": vauth.generate_secret(), "session_ttl_hours": 720}
+            "secret": vauth.generate_secret(), "session_ttl_hours": 720,
+            "max_attempts": 8, "lockout_minutes": 15}
 app2 = create_app(write_cfg("auth.yaml", auth=auth_cfg))
 with TestClient(app2) as c:
     time.sleep(0.4)
@@ -128,5 +139,26 @@ with TestClient(app2) as c:
     c.post("/api/logout")
     assert c.get("/api/config").status_code == 401
     print("PASS  auth app: logout clears session")
+
+# ---- rate-limiting: lockout after too many failures ----
+rl_cfg = {"enabled": True, "username": "dave",
+          "password_hash": vauth.hash_password("hunter2"),
+          "secret": vauth.generate_secret(), "session_ttl_hours": 720,
+          "max_attempts": 3, "lockout_minutes": 15}
+app3 = create_app(write_cfg("rl.yaml", auth=rl_cfg))
+with TestClient(app3) as c:
+    for _ in range(3):
+        assert c.post("/api/login", json={"username": "dave", "password": "nope"}).status_code == 401
+    # even the CORRECT password is now refused with 429 during lockout
+    r = c.post("/api/login", json={"username": "dave", "password": "hunter2"})
+    assert r.status_code == 429, r.status_code
+    print("PASS  rate-limit: locks out after 3 failures (correct pw -> 429)")
+
+# ---- secure_cookies flag emits a Secure cookie ----
+app4 = create_app(write_cfg("secure.yaml", auth=auth_cfg, secure=True))
+with TestClient(app4) as c:
+    r = c.post("/api/login", json={"username": "dave", "password": "hunter2"})
+    assert r.status_code == 200 and "secure" in r.headers.get("set-cookie", "").lower()
+    print("PASS  secure_cookies: login Set-Cookie carries Secure attribute")
 
 print("\nALL SMOKE TESTS PASSED")

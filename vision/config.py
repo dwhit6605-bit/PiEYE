@@ -27,12 +27,17 @@ DEFAULTS = {
         "port": 8080,
         "auth_token": None,          # optional machine token (X-Auth-Token header)
         "live_fps": 10,              # MJPEG frame rate while someone is watching
+        "secure_cookies": False,     # set True when served over HTTPS (behind a TLS proxy)
+        "behind_proxy": False,       # trust X-Forwarded-* from a local reverse proxy
+        "trusted_proxies": "127.0.0.1",  # forwarded_allow_ips for uvicorn
         "auth": {                    # username/password login for the web UI
             "enabled": False,
             "username": "admin",
             "password_hash": None,   # set via scripts/set_password.py
             "secret": None,          # HMAC session-signing key (auto-generated)
             "session_ttl_hours": 720,
+            "max_attempts": 8,       # failed logins before lockout
+            "lockout_minutes": 15,   # lockout duration after too many failures
         },
     },
     "storage": {

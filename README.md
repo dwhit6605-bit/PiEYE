@@ -69,10 +69,21 @@ sudo systemctl restart pieye.service
 
 This stores a salted **PBKDF2** password hash and an auto-generated session-signing
 secret in `config.yaml` (never plaintext). Logging in sets an HttpOnly session cookie;
-"Sign out" is on the Settings tab. For scripts/automation you can instead set
-`server.auth_token` and send it as an `X-Auth-Token` header. Over plain HTTP the cookie
-isn't encrypted in transit — put the Pi behind the WireGuard tunnel (or a TLS reverse
-proxy) if you access it from outside your LAN.
+"Sign out" is on the Settings tab. Failed logins are **rate-limited**
+(`server.auth.max_attempts` / `lockout_minutes`) to blunt brute-forcing. For
+scripts/automation you can instead set `server.auth_token` and send it as an
+`X-Auth-Token` header.
+
+### HTTPS + a custom domain
+
+To serve `https://pieye.yourdomain.com` with a Let's Encrypt cert, put a reverse proxy
+in front (PiEYE stays plain HTTP behind it) and set `server.secure_cookies: true` +
+`server.behind_proxy: true`. Ready-made configs are in [`deploy/`](deploy/) (Caddy,
+nginx, Cloudflare Tunnel) and a full walkthrough is in **[docs/tls.md](docs/tls.md)**.
+
+⚠️ A camera on the public internet is a real target. Prefer a **private** setup —
+WireGuard + a DNS-01 cert, or a Cloudflare Tunnel with Access in front — over
+port-forwarding. Both give you the HTTPS hostname with **zero open ports**.
 
 ## Hardware
 

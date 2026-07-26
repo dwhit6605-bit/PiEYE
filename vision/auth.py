@@ -4,9 +4,50 @@ import hashlib
 import hmac
 import json
 import os
+import threading
 import time
 
 PBKDF2_ITERATIONS = 200_000
+
+
+class LoginLimiter:
+    """In-memory failed-login throttle, keyed by client-ip + username.
+
+    After `max_attempts` failures within the lockout window, that key is locked
+    for `lockout_seconds`. State is per-process (resets on restart) -- enough to
+    stop credential stuffing without any external dependency.
+    """
+
+    def __init__(self, max_attempts=8, lockout_seconds=900):
+        self.max = max(1, int(max_attempts))
+        self.lockout = max(1, int(lockout_seconds))
+        self._fails = {}
+        self._lock = threading.Lock()
+
+    def _recent(self, key):
+        now = time.time()
+        fails = [t for t in self._fails.get(key, []) if now - t < self.lockout]
+        if fails:
+            self._fails[key] = fails
+        else:
+            self._fails.pop(key, None)
+        return fails
+
+    def locked_for(self, key):
+        """Seconds remaining in lockout, or 0 if allowed."""
+        with self._lock:
+            fails = self._recent(key)
+            if len(fails) >= self.max:
+                return max(0, int(fails[-1] + self.lockout - time.time()))
+            return 0
+
+    def record_failure(self, key):
+        with self._lock:
+            self._fails.setdefault(key, []).append(time.time())
+
+    def reset(self, key):
+        with self._lock:
+            self._fails.pop(key, None)
 
 
 def generate_secret(n=32):

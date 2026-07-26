@@ -55,6 +55,9 @@ def create_app(config_path):
 
     store = EventStore(cfg["storage"]["db_path"], cfg["storage"]["snapshot_dir"])
     monitor = Monitor(cfg, store)
+    a = cfg["server"]["auth"]
+    limiter = auth.LoginLimiter(a.get("max_attempts", 8),
+                                int(a.get("lockout_minutes", 15)) * 60)
 
     app = FastAPI(title="PiEYE")
     app.state.config_path = config_path
@@ -92,12 +95,24 @@ def create_app(config_path):
     @app.post("/api/login")
     async def login(request: Request):
         body = await request.json()
-        if not auth.check_credentials(app.state.cfg, body.get("username"), body.get("password")):
+        username = body.get("username") or ""
+        ip = request.client.host if request.client else "unknown"
+        key = f"{ip}:{username}"
+
+        wait = limiter.locked_for(key)
+        if wait:
+            raise HTTPException(status_code=429,
+                                detail=f"Too many attempts. Try again in {wait}s.")
+        if not auth.check_credentials(app.state.cfg, username, body.get("password")):
+            limiter.record_failure(key)
             raise HTTPException(status_code=401, detail="Invalid username or password")
+
+        limiter.reset(key)
         a = app.state.cfg["server"]["auth"]
         token = auth.make_session(a["username"], a["secret"], a.get("session_ttl_hours", 720))
         resp = JSONResponse({"ok": True, "username": a["username"]})
         resp.set_cookie("pv_session", token, httponly=True, samesite="lax",
+                        secure=bool(app.state.cfg["server"].get("secure_cookies")),
                         max_age=int(a.get("session_ttl_hours", 720) * 3600), path="/")
         return resp
 
@@ -200,7 +215,12 @@ def main():
     import uvicorn
     cfg = load_config(args.config)
     app = create_app(args.config)
-    uvicorn.run(app, host=cfg["server"]["host"], port=cfg["server"]["port"], log_level="info")
+    s = cfg["server"]
+    # TLS is terminated by a reverse proxy (see deploy/ + docs/tls.md); uvicorn
+    # stays plain HTTP and just trusts the proxy's X-Forwarded-* headers.
+    uvicorn.run(app, host=s["host"], port=s["port"], log_level="info",
+                proxy_headers=bool(s.get("behind_proxy")),
+                forwarded_allow_ips=s.get("trusted_proxies", "127.0.0.1"))
 
 
 if __name__ == "__main__":

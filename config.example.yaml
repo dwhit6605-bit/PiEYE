@@ -47,12 +47,17 @@ server:
   port: 8080            # open http://<pi-ip>:8080 ; changing this needs a service restart
   live_fps: 10          # MJPEG stream frame rate while a Live view is open
   auth_token: null      # optional MACHINE token (X-Auth-Token header) for scripts/automation
+  secure_cookies: false # set true when served over HTTPS behind a TLS proxy (see docs/tls.md)
+  behind_proxy: false   # trust X-Forwarded-* from a local reverse proxy (Caddy/nginx)
+  trusted_proxies: 127.0.0.1   # forwarded_allow_ips for uvicorn
   auth:                 # web-UI login. Don't hand-edit -- run: python -m vision.set_password
     enabled: false
     username: admin
     password_hash: null # salted PBKDF2 hash, written by set_password
     secret: null        # session-signing key, auto-generated when login is enabled
     session_ttl_hours: 720
+    max_attempts: 8     # failed logins before a temporary lockout
+    lockout_minutes: 15 # how long that ip+user is locked out
 
 storage:
   db_path: data/events.db

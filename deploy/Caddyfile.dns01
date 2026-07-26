@@ -1,0 +1,23 @@
+# PiEYE — internal host + valid cert via DNS-01 (RECOMMENDED).
+#
+# Gets a real Let's Encrypt cert for pieye.example.com WITHOUT opening any inbound
+# ports: ownership is proven with a DNS TXT record. The host can point at a private
+# LAN IP and be reached over WireGuard.
+#
+# Needs a Caddy build that includes your DNS provider plugin, e.g. Cloudflare:
+#   sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
+#   # (install Caddy) then rebuild with the DNS module:
+#   xcaddy build --with github.com/caddy-dns/cloudflare
+# and a scoped API token exported as CLOUDFLARE_API_TOKEN (Zone:DNS:Edit).
+#
+# config.yaml:  server.secure_cookies: true,  server.behind_proxy: true
+
+pieye.example.com {
+    tls {
+        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+        resolvers 1.1.1.1
+    }
+    reverse_proxy 127.0.0.1:8080 {
+        flush_interval -1
+    }
+}
