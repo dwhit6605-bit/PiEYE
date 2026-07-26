@@ -10,7 +10,7 @@ import numpy as np
 import yaml
 from fastapi.testclient import TestClient
 
-ROOT = "/Users/davidwhitaker/Documents/Claude/Projects/HOMELAB/pi-security-vision"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 work = tempfile.mkdtemp(prefix="pv-smoke-")

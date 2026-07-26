@@ -1,7 +1,15 @@
 # PiEYE
 
+![PiEYE](docs/hero.svg)
+
+[![CI](https://github.com/dwhit6605-bit/PiEYE/actions/workflows/ci.yml/badge.svg)](https://github.com/dwhit6605-bit/PiEYE/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-4c8dff.svg)](LICENSE)
+
 A privacy-first security-camera monitor for a Raspberry Pi 4 + UVC (USB) webcams.
 Runs **100% offline** by default; the cloud Claude description tier is optional.
+
+> The banner above is a styled mockup of the real UI — drop in an actual phone
+> screenshot or a screen-recording GIF under `docs/` and swap the image link anytime.
 
 ## Quick start (one line on the Pi)
 
