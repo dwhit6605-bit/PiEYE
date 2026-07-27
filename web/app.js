@@ -1,7 +1,7 @@
 "use strict";
 
 const view = document.getElementById("view");
-const state = { cfg: null, health: null, liveTimers: [] };
+const state = { cfg: null, health: null, liveTimers: [], eventsSig: null };
 
 // ---- api helpers -------------------------------------------------------
 // Auth is a session cookie (set by /api/login), sent automatically on every
@@ -103,6 +103,11 @@ async function renderEvents() {
   document.getElementById("fCam").onchange = loadEvents;
   document.getElementById("fLabel").oninput = debounce(loadEvents, 350);
   await loadEvents();
+  // Clips finish recording a few seconds after the event row is written, and new
+  // events arrive while you're looking -- refresh so both show up on their own.
+  state.liveTimers.push(setInterval(() => {
+    if (document.getElementById("evGrid") && document.getElementById("modal").hidden) loadEvents();
+  }, 10000));
 }
 async function loadEvents() {
   const cam = document.getElementById("fCam").value;
@@ -126,6 +131,11 @@ async function loadEvents() {
   sel.value = cur;
 
   const grid = document.getElementById("evGrid");
+  // Skip the re-render when nothing changed, so a background refresh never
+  // yanks your scroll position mid-scroll.
+  const sig = JSON.stringify(data.events.map(e => [e.id, e.clip]));
+  if (sig === state.eventsSig && grid.children.length) return;
+  state.eventsSig = sig;
   if (!data.events.length) {
     grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">◷</div><p>No events yet. Walk in front of a camera.</p></div>`;
     return;
