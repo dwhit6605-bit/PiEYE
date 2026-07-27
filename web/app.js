@@ -173,8 +173,21 @@ async function renderSettings() {
       <div class="field"><label>Classes of interest (comma separated)</label><input id="d_classes" value="${classes}"></div>
     </div>
 
+    <div class="section-title">Push notifications (this device)</div>
+    <div class="card" style="padding:14px">
+      <div id="pushStatus" class="hint">Checking…</div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn-primary" id="pushEnable" hidden>Enable on this device</button>
+        <button class="btn-ghost" id="pushDisable" hidden>Disable</button>
+        <button class="btn-ghost" id="pushTest" hidden>Send test</button>
+      </div>
+      <div class="hint" style="margin-top:8px">Native browser notifications — no third-party app.
+        Requires HTTPS; on iPhone, add PiEYE to your Home Screen first.</div>
+    </div>
+
     <div class="section-title">Notifications (ntfy)</div>
     <div class="card" style="padding:14px">
+      <div class="field inline"><input type="checkbox" id="n_en" ${cfg.notify.ntfy_enabled !== false ? "checked" : ""}><label style="margin:0">Also send via ntfy</label></div>
       <div class="row">
         <div class="field"><label>ntfy server</label><input id="n_srv" value="${cfg.notify.ntfy_server}"></div>
         <div class="field"><label>Topic</label><input id="n_topic" value="${cfg.notify.ntfy_topic}"></div>
@@ -214,6 +227,7 @@ async function renderSettings() {
     </div>`;
 
   renderAccount();
+  renderPush();
   document.getElementById("d_back").value = cfg.detection.backend || "yolo";
   renderCamRows();
   document.getElementById("addCam").onclick = () => {
@@ -251,6 +265,7 @@ async function saveSettings() {
   cfg.detection.backend = document.getElementById("d_back").value;
   cfg.detection.confidence = num("d_conf"); cfg.detection.cooldown_seconds = num("d_cool");
   cfg.detection.classes_of_interest = document.getElementById("d_classes").value.split(",").map(s => s.trim()).filter(Boolean);
+  cfg.notify.ntfy_enabled = document.getElementById("n_en").checked;
   cfg.notify.ntfy_server = document.getElementById("n_srv").value.trim();
   cfg.notify.ntfy_topic = document.getElementById("n_topic").value.trim();
   cfg.notify.priority = document.getElementById("n_pri").value;
@@ -276,6 +291,75 @@ async function renderAccount() {
     box.innerHTML = `Login is <strong>disabled</strong> — the UI is open to anyone on the network. ` +
       `Enable it on the Pi with <code>python -m vision.set_password</code>.`;
   }
+}
+
+// ---- web push ----------------------------------------------------------
+function b64ToUint8(b64) {
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+async function renderPush() {
+  const box = document.getElementById("pushStatus");
+  const bEn = document.getElementById("pushEnable");
+  const bOff = document.getElementById("pushDisable");
+  const bTest = document.getElementById("pushTest");
+  if (!box) return;
+  const show = (en, off, test) => { bEn.hidden = !en; bOff.hidden = !off; bTest.hidden = !test; };
+
+  // Hard requirements first — be explicit instead of failing silently.
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    box.innerHTML = "⚠️ This browser doesn't support web push."; show(0, 0, 0); return;
+  }
+  if (!window.isSecureContext) {
+    box.innerHTML = "🔒 Push needs <strong>HTTPS</strong>. You're on plain http, so the browser " +
+      "blocks it. See <code>docs/tls.md</code> for free options (Tailscale, DuckDNS).";
+    show(0, 0, 0); return;
+  }
+  if (Notification.permission === "denied") {
+    box.innerHTML = "🚫 Notifications are blocked for this site — re-allow them in your browser settings.";
+    show(0, 0, 0); return;
+  }
+
+  let st; try { st = await api("/api/push/status"); } catch { return; }
+  const reg = await navigator.serviceWorker.getRegistration();
+  const sub = reg ? await reg.pushManager.getSubscription() : null;
+
+  if (sub) {
+    box.innerHTML = `✅ Push is <strong>on</strong> for this device (${st.subscriptions} device(s) subscribed).`;
+    show(0, 1, 1);
+  } else {
+    box.innerHTML = st.enabled
+      ? `Push is available (${st.subscriptions} other device(s) subscribed). Enable it here.`
+      : "Push is off. Enabling generates a key on the Pi and subscribes this device.";
+    show(1, 0, 0);
+  }
+
+  bEn.onclick = async () => {
+    try {
+      if (await Notification.requestPermission() !== "granted") { toast("Permission denied", "err"); return; }
+      const { public_key } = await api("/api/push/enable", { method: "POST" });
+      const r = await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
+      const s = await r.pushManager.subscribe({
+        userVisibleOnly: true, applicationServerKey: b64ToUint8(public_key) });
+      await api("/api/push/subscribe", { method: "POST", body: JSON.stringify(s.toJSON()) });
+      toast("Push enabled", "ok"); renderPush();
+    } catch (e) { toast(e.message || "Could not enable push", "err"); }
+  };
+  bOff.onclick = async () => {
+    try {
+      const r = await navigator.serviceWorker.getRegistration();
+      const s = r && await r.pushManager.getSubscription();
+      if (s) { await api("/api/push/unsubscribe", { method: "POST", body: JSON.stringify({ endpoint: s.endpoint }) }); await s.unsubscribe(); }
+      toast("Push disabled", "ok"); renderPush();
+    } catch (e) { toast(e.message, "err"); }
+  };
+  bTest.onclick = async () => {
+    try { const r = await api("/api/push/test", { method: "POST" }); toast(`Test sent to ${r.sent} device(s)`, "ok"); }
+    catch (e) { toast(e.message, "err"); }
+  };
 }
 
 // ---- login -------------------------------------------------------------

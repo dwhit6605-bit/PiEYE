@@ -33,7 +33,37 @@ class EventStore:
             )
         """)
         self._db.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts)")
+        self._db.execute("""
+            CREATE TABLE IF NOT EXISTS push_subs (
+                endpoint TEXT PRIMARY KEY,
+                sub_json TEXT NOT NULL,
+                label    TEXT,
+                created  REAL NOT NULL
+            )
+        """)
         self._db.commit()
+
+    # ---- web push subscriptions ----
+    def add_push_sub(self, endpoint, sub_json, label=None, created=None):
+        import time as _t
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO push_subs (endpoint, sub_json, label, created) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(endpoint) DO UPDATE SET sub_json=excluded.sub_json",
+                (endpoint, sub_json, label, created if created is not None else _t.time()),
+            )
+            self._db.commit()
+
+    def list_push_subs(self):
+        with self._lock:
+            rows = self._db.execute("SELECT * FROM push_subs").fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_push_sub(self, endpoint):
+        with self._lock:
+            cur = self._db.execute("DELETE FROM push_subs WHERE endpoint = ?", (endpoint,))
+            self._db.commit()
+            return cur.rowcount > 0
 
     def add_event(self, ts, iso, camera, labels, message, jpeg_bytes=None, max_conf=None):
         snapshot = None

@@ -34,11 +34,17 @@ detection:
     - cat
 
 notify:
+  ntfy_enabled: true    # set false to rely on web push alone
   ntfy_server: https://ntfy.sh
   ntfy_topic: CHANGE-ME-to-something-long-and-random   # anyone who knows it can read your alerts
   # ntfy_token: tk_xxx        # only if you self-host ntfy with auth
   priority: high
   min_confidence_to_alert: 0.5
+  web_push:             # native PWA notifications -- no third-party app
+    enabled: false      # turn on from Settings -> Push notifications (needs HTTPS)
+    subject: mailto:pieye@localhost
+    public_key: null    # VAPID keypair, generated automatically on first enable
+    private_key: null   # secret -- redacted from the web API
 
 claude:
   enabled: false        # flip to true once you have an API key for sentence-level descriptions

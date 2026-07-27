@@ -71,8 +71,17 @@ class Monitor:
         detector = build_detector(cfg["detection"])
         self.live_fps = cfg["server"].get("live_fps", 10)
         n = cfg["notify"]
-        notifier = NtfyNotifier(n.get("ntfy_server"), n.get("ntfy_topic"),
-                                n.get("priority", "high"), n.get("ntfy_token"))
+        notifier = None
+        if n.get("ntfy_enabled", True):
+            notifier = NtfyNotifier(n.get("ntfy_server"), n.get("ntfy_topic"),
+                                    n.get("priority", "high"), n.get("ntfy_token"))
+        wp = n.get("web_push", {})
+        pusher = None
+        if wp.get("enabled") and wp.get("private_key"):
+            from .push import WebPushSender
+            pusher = WebPushSender(self.store, wp["private_key"],
+                                   wp.get("subject", "mailto:pieye@localhost"))
+        self._pusher = pusher
         describer = None
         if cfg["claude"].get("enabled"):
             from .describe import ClaudeDescriber
@@ -185,9 +194,15 @@ class Monitor:
         jpeg = buf.tobytes() if ok else None
         self.latest_jpeg[cam.id] = jpeg or self.latest_jpeg.get(cam.id)
 
-        self.store.add_event(ts, iso, cam.id, labels, message, jpeg, max_conf)
+        event_id = self.store.add_event(ts, iso, cam.id, labels, message, jpeg, max_conf)
         self.status["last_event"] = {"camera": cam.id, "labels": labels,
                                      "message": message, "iso": iso}
         title = f"{cam.id}: {labels}"
         print(f"[alert] {title} -- {message}", flush=True)
-        notifier.send(title, message, frame=frame, tags=["rotating_light", "camera"])
+
+        if notifier is not None:
+            notifier.send(title, message, frame=frame, tags=["rotating_light", "camera"])
+        if getattr(self, "_pusher", None) is not None:
+            row = self.store.get_event(event_id) or {}
+            self._pusher.send(title, message, url="/#events",
+                              snapshot=row.get("snapshot"), tag=f"pieye-{cam.id}")

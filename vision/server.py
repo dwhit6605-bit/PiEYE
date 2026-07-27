@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import copy
+import json
 import os
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -8,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import auth
+from . import push as push_mod
 from .config import load_config, save_config, validate_config
 from .store import EventStore
 from .monitor import Monitor
@@ -28,6 +30,9 @@ def _redact(cfg):
         a["secret"] = REDACTED
     if a.get("password_hash"):
         a["password_hash"] = REDACTED
+    wp = out.get("notify", {}).get("web_push", {})
+    if wp.get("private_key"):
+        wp["private_key"] = REDACTED
     return out
 
 
@@ -42,6 +47,12 @@ def _restore_secrets(incoming, current):
             ai[k] = ac.get(k)
     ci["auth"] = ai
     incoming["server"] = ci
+    wi = (incoming.get("notify", {}) or {}).get("web_push", {}) or {}
+    wc = (current.get("notify", {}) or {}).get("web_push", {}) or {}
+    if wi.get("private_key") == REDACTED or wi.get("private_key") is None:
+        wi["private_key"] = wc.get("private_key")
+    if incoming.get("notify") is not None:
+        incoming["notify"]["web_push"] = wi
     return incoming
 
 
@@ -202,6 +213,57 @@ def create_app(config_path):
         return StreamingResponse(
             gen(), media_type="multipart/x-mixed-replace; boundary=frame",
             headers={"Cache-Control": "no-store", "Connection": "close"})
+
+    # ---- web push --------------------------------------------------------
+    @app.get("/api/push/status")
+    def push_status():
+        wp = app.state.cfg["notify"].get("web_push", {})
+        return {"enabled": bool(wp.get("enabled")),
+                "public_key": wp.get("public_key"),
+                "subscriptions": len(store.list_push_subs())}
+
+    @app.post("/api/push/enable")
+    def push_enable():
+        """Turn on web push, generating a VAPID keypair on first use."""
+        cfg_now = app.state.cfg
+        wp = cfg_now["notify"].setdefault("web_push", {})
+        if not wp.get("private_key") or not wp.get("public_key"):
+            try:
+                priv, pub = push_mod.generate_vapid_keys()
+            except ImportError:
+                raise HTTPException(status_code=500,
+                                    detail="cryptography not installed on the server")
+            wp["private_key"], wp["public_key"] = priv, pub
+        wp["enabled"] = True
+        save_config(app.state.config_path, cfg_now)
+        app.state.cfg = load_config(app.state.config_path)
+        monitor.request_reload(app.state.cfg)
+        return {"ok": True, "public_key": wp["public_key"]}
+
+    @app.post("/api/push/subscribe")
+    async def push_subscribe(request: Request):
+        sub = await request.json()
+        endpoint = sub.get("endpoint")
+        if not endpoint:
+            raise HTTPException(status_code=400, detail="missing endpoint")
+        store.add_push_sub(endpoint, json.dumps(sub), label=request.headers.get("user-agent"))
+        return {"ok": True, "subscriptions": len(store.list_push_subs())}
+
+    @app.post("/api/push/unsubscribe")
+    async def push_unsubscribe(request: Request):
+        body = await request.json()
+        store.delete_push_sub(body.get("endpoint", ""))
+        return {"ok": True, "subscriptions": len(store.list_push_subs())}
+
+    @app.post("/api/push/test")
+    def push_test():
+        wp = app.state.cfg["notify"].get("web_push", {})
+        if not (wp.get("enabled") and wp.get("private_key")):
+            raise HTTPException(status_code=400, detail="web push is not enabled")
+        sender = push_mod.WebPushSender(store, wp["private_key"],
+                                        wp.get("subject", "mailto:pieye@localhost"))
+        sent = sender.send("PiEYE test", "Push notifications are working.", url="/#events")
+        return {"ok": True, "sent": sent}
 
     # ---- PWA static (mounted last so /api/* wins) ------------------------
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

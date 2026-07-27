@@ -16,10 +16,17 @@ DEFAULTS = {
                                 "motorcycle", "dog", "cat"],
     },
     "notify": {
+        "ntfy_enabled": True,
         "ntfy_server": "https://ntfy.sh",
         "ntfy_topic": "change-me",
         "priority": "high",
         "min_confidence_to_alert": 0.5,
+        "web_push": {
+            "enabled": False,
+            "subject": "mailto:pieye@localhost",
+            "public_key": None,      # auto-generated when enabled
+            "private_key": None,     # secret -- redacted from the API
+        },
     },
     "claude": {"enabled": False, "model": "claude-haiku-4-5-20251001"},
     "server": {
@@ -82,9 +89,12 @@ def validate_config(cfg):
         ids.add(c["id"])
     if cfg.get("detection", {}).get("backend") not in ("yolo", "none", "off", None):
         raise ValueError("detection.backend must be 'yolo' or 'none'")
-    topic = cfg.get("notify", {}).get("ntfy_topic", "")
-    if not topic or topic == "change-me":
-        raise ValueError("notify.ntfy_topic must be set to something unique")
+    n = cfg.get("notify", {})
+    if n.get("ntfy_enabled", True):
+        topic = n.get("ntfy_topic", "")
+        if not topic or topic == "change-me":
+            raise ValueError("notify.ntfy_topic must be set to something unique "
+                             "(or turn ntfy off and use web push)")
     return True
 
 

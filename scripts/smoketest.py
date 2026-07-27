@@ -154,6 +154,55 @@ with TestClient(app3) as c:
     assert r.status_code == 429, r.status_code
     print("PASS  rate-limit: locks out after 3 failures (correct pw -> 429)")
 
+# ---- web push: keys, subscribe/unsubscribe, redaction ----
+from vision import push as vpush  # noqa: E402
+
+priv, pub = vpush.generate_vapid_keys()
+assert "BEGIN PRIVATE KEY" in priv and len(pub) > 80
+print("PASS  web push: VAPID keypair generated")
+
+st2 = EventStore("data/events.db", "data/snaps")
+st2.add_push_sub("https://push.example/abc", '{"endpoint":"https://push.example/abc"}', "test-ua")
+assert len(st2.list_push_subs()) == 1
+st2.add_push_sub("https://push.example/abc", '{"endpoint":"https://push.example/abc"}')  # upsert
+assert len(st2.list_push_subs()) == 1, "duplicate endpoint should upsert, not duplicate"
+assert st2.delete_push_sub("https://push.example/abc") and len(st2.list_push_subs()) == 0
+print("PASS  web push: subscription store add/upsert/delete")
+
+app5 = create_app(write_cfg("push.yaml"))
+with TestClient(app5) as c:
+    assert c.get("/api/push/status").json()["enabled"] is False
+    r = c.post("/api/push/enable")
+    assert r.status_code == 200 and r.json()["public_key"], r.text
+    pubkey = r.json()["public_key"]
+    stat = c.get("/api/push/status").json()
+    assert stat["enabled"] is True and stat["public_key"] == pubkey
+    print("PASS  web push: enable generates + persists VAPID keys")
+
+    # private key must never reach the browser
+    got = c.get("/api/config").json()
+    assert got["notify"]["web_push"]["private_key"] == "__unchanged__"
+    assert got["notify"]["web_push"]["public_key"] == pubkey
+    print("PASS  web push: private key redacted, public key exposed")
+
+    sub = {"endpoint": "https://push.example/xyz", "keys": {"p256dh": "k", "auth": "a"}}
+    assert c.post("/api/push/subscribe", json=sub).json()["subscriptions"] == 1
+    assert c.post("/api/push/unsubscribe", json={"endpoint": sub["endpoint"]}).json()["subscriptions"] == 0
+    print("PASS  web push: subscribe/unsubscribe endpoints")
+
+    # saving a redacted config must not wipe the real private key
+    c.put("/api/config", json=got)
+    disk = yaml.safe_load(open(os.path.join(work, "push.yaml")))
+    assert disk["notify"]["web_push"]["private_key"].startswith("-----BEGIN")
+    print("PASS  web push: PUT config preserves redacted private key")
+
+# ---- ntfy can be disabled without failing validation ----
+from vision.config import validate_config  # noqa: E402
+ok_cfg = {"cameras": [{"id": "c", "source": 0}], "detection": {"backend": "none"},
+          "notify": {"ntfy_enabled": False, "ntfy_topic": "change-me"}}
+assert validate_config(ok_cfg) is True
+print("PASS  config: ntfy_enabled=false allows unset topic (push-only mode)")
+
 # ---- secure_cookies flag emits a Secure cookie ----
 app4 = create_app(write_cfg("secure.yaml", auth=auth_cfg, secure=True))
 with TestClient(app4) as c:

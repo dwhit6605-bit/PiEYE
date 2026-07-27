@@ -4,5 +4,6 @@ pyyaml
 requests
 fastapi
 uvicorn[standard]
+pywebpush          # native PWA push notifications (VAPID)
 ultralytics        # local YOLO object detection (pulls in torch). Omit if detection.backend: none
 # anthropic        # uncomment only if you enable the optional Claude description tier
