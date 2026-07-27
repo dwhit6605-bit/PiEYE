@@ -47,9 +47,16 @@ cd "$INSTALL_DIR"
 if command -v apt-get >/dev/null 2>&1; then
   say "Installing system packages (sudo)"
   sudo apt-get update
-  sudo apt-get install -y python3-venv python3-pip libatlas-base-dev libopenjp2-7 ffmpeg v4l-utils
+  # Required
+  sudo apt-get install -y python3-venv python3-pip
+  # Optional runtime libs. Availability varies across Debian releases
+  # (e.g. libatlas-base-dev was dropped on trixie / Debian 13), so install
+  # these best-effort and never abort the installer over one missing candidate.
+  for pkg in ffmpeg v4l-utils libopenjp2-7 libopenblas0 libatlas-base-dev; do
+    sudo apt-get install -y "$pkg" 2>/dev/null || warn "optional package unavailable, skipping: $pkg"
+  done
 else
-  warn "apt-get not found -- skipping system packages (install python3-venv, ffmpeg, v4l-utils yourself)."
+  warn "apt-get not found -- install python3-venv, python3-pip, ffmpeg, v4l-utils yourself."
 fi
 
 # --- 2. python environment ---------------------------------------------
