@@ -4,6 +4,7 @@ from datetime import datetime
 
 import cv2
 
+from . import arming
 from . import zones
 from .camera import Camera
 from .motion import MotionDetector
@@ -32,8 +33,46 @@ class Monitor:
         self._zones = {}            # camera_id -> normalized polygon (or None)
         self._viewers = 0           # active MJPEG stream clients
         self._viewers_lock = threading.Lock()
+        self.armed = bool(cfg.get("arming", {}).get("armed", True))
+        self._sched_state = None    # last schedule-computed armed value
+        self._known_failed = None   # camera ids known to be down (for down/up alerts)
+        self._notifier = None
+        self._clips = None
         self.status = {"running": False, "cameras": [], "backend": None, "claude": False,
-                       "last_event": None, "error": None}
+                       "last_event": None, "error": None, "armed": self.armed}
+
+    # ---- arm / disarm ----------------------------------------------------
+    def set_armed(self, armed):
+        self.armed = bool(armed)
+        self.status["armed"] = self.armed
+        print(f"[monitor] {'ARMED' if self.armed else 'DISARMED'}", flush=True)
+        return self.armed
+
+    def _apply_schedule(self, cfg):
+        """Flip armed state when a scheduled boundary is crossed.
+
+        Only acts on transitions, so a manual toggle sticks until the next
+        scheduled arm/disarm time rather than being immediately overridden.
+        """
+        a = cfg.get("arming", {})
+        if not a.get("schedule_enabled"):
+            self._sched_state = None
+            return
+        want = arming.scheduled_armed(arming.now_minutes(datetime.now()),
+                                      a.get("arm_at"), a.get("disarm_at"))
+        if want is None:
+            return
+        if self._sched_state is None or want != self._sched_state:
+            self._sched_state = want
+            if want != self.armed:
+                self.set_armed(want)
+
+    def _notify_all(self, title, message, tags=None):
+        """Send a system message (not a detection) over every enabled channel."""
+        if self._notifier is not None:
+            self._notifier.send(title, message, tags=tags or ["warning"])
+        if getattr(self, "_pusher", None) is not None:
+            self._pusher.send(title, message, url="/#live", tag="pieye-system")
 
     # ---- live-stream viewer accounting (drives adaptive FPS) -------------
     def add_viewer(self):
@@ -96,13 +135,40 @@ class Monitor:
             pusher = WebPushSender(self.store, wp["private_key"],
                                    wp.get("subject", "mailto:pieye@localhost"))
         self._pusher = pusher
+        self._notifier = notifier
+
+        clip_cfg = cfg["storage"].get("clips", {}) or {}
+        if self._clips is not None:
+            self._clips.flush()
+        self._clips = None
+        if clip_cfg.get("enabled"):
+            from .clips import ClipRecorder
+            self._clips = ClipRecorder(
+                self.store.clip_dir,
+                pre_seconds=clip_cfg.get("pre_seconds", 4),
+                post_seconds=clip_cfg.get("post_seconds", 6),
+                fps=clip_cfg.get("fps", 8),
+            )
         describer = None
         if cfg["claude"].get("enabled"):
             from .describe import ClaudeDescriber
             describer = ClaudeDescriber(cfg["claude"].get("model"))
+        # Alert on camera down/up transitions -- a silent failure is the worst
+        # failure mode for a security system.
+        if n.get("alert_on_camera_down", True) and self._known_failed is not None:
+            for cid, err in failed.items():
+                if cid not in self._known_failed:
+                    self._notify_all(f"Camera down: {cid}", str(err), tags=["warning"])
+            for cid in self._known_failed:
+                if cid not in failed and cid in [c.id for c, _ in cams]:
+                    self._notify_all(f"Camera back online: {cid}", "Reporting again.",
+                                     tags=["white_check_mark"])
+        self._known_failed = set(failed)
+
         self.status.update({
             "cameras": [c.id for c, _ in cams],
             "failed_cameras": failed,
+            "armed": self.armed,
             "backend": cfg["detection"].get("backend", "yolo"),
             "claude": bool(describer),
             "error": (f"{len(failed)} camera(s) unavailable: "
@@ -170,10 +236,12 @@ class Monitor:
                         continue
                     dead_reads[cam.id] = 0
                     self._update_live(cam.id, frame)
+                    if self._clips is not None:
+                        self._clips.offer(cam.id, frame, time.time())
 
                     moved, _ = motion.update(frame)
-                    if not moved:
-                        continue
+                    if not moved or not self.armed:
+                        continue    # disarmed: live view stays up, nothing recorded
                     now = time.time()
                     if now - last_alert.get(cam.id, 0) < cooldown:
                         continue
@@ -192,6 +260,8 @@ class Monitor:
 
                     last_alert[cam.id] = now
                     self._handle_alert(cam, frame, interesting, describer, notifier)
+
+                self._apply_schedule(cfg)
 
                 # periodic retention sweep (~ every 10 min)
                 if time.time() - last_prune > 600:
@@ -244,6 +314,12 @@ class Monitor:
                                      "message": message, "iso": iso}
         title = f"{cam.id}: {labels}"
         print(f"[alert] {title} -- {message}", flush=True)
+
+        # Start a clip: pre-roll already sits in the buffer, post-roll follows.
+        if self._clips is not None:
+            fname = f"{int(ts * 1000)}_{cam.id}.mp4".replace("/", "_")
+            self._clips.start(cam.id, ts, fname,
+                              on_done=lambda f, eid=event_id: self.store.set_event_clip(eid, f))
 
         if notifier is not None:
             notifier.send(title, message, frame=frame, tags=["rotating_light", "camera"])

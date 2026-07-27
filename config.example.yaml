@@ -35,8 +35,15 @@ detection:
     - dog
     - cat
 
+arming:
+  armed: true           # false = live view still works, but nothing alerts
+  schedule_enabled: false
+  arm_at: "22:00"       # auto-arm (overnight windows are fine)
+  disarm_at: "07:00"
+
 notify:
-  ntfy_enabled: true    # set false to rely on web push alone
+  ntfy_enabled: true
+  alert_on_camera_down: true   # notify when a camera stops reporting / recovers    # set false to rely on web push alone
   ntfy_server: https://ntfy.sh
   ntfy_topic: CHANGE-ME-to-something-long-and-random   # anyone who knows it can read your alerts
   # ntfy_token: tk_xxx        # only if you self-host ntfy with auth
@@ -75,5 +82,10 @@ storage:
   snapshot_dir: data/snapshots
   retention_days: 14    # auto-delete events + snapshots older than this
   max_events: 5000      # hard cap on stored events
+  clips:                # short video around each event
+    enabled: false
+    pre_seconds: 4      # buffered before the trigger
+    post_seconds: 6     # recorded after
+    fps: 8
 
 loop_delay: 0.1         # seconds between capture cycles

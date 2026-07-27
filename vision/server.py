@@ -180,6 +180,13 @@ def create_app(config_path):
             raise HTTPException(status_code=404, detail="not found")
         return FileResponse(path, media_type="image/jpeg")
 
+    @app.get("/api/clips/{filename}")
+    def clip(filename: str):
+        path = store.clip_path(filename)
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="not found")
+        return FileResponse(path, media_type="video/mp4")
+
     # ---- live: single frame + MJPEG stream ------------------------------
     @app.get("/api/cameras/{cam_id}/live.jpg")
     def live(cam_id: str):
@@ -213,6 +220,18 @@ def create_app(config_path):
         return StreamingResponse(
             gen(), media_type="multipart/x-mixed-replace; boundary=frame",
             headers={"Cache-Control": "no-store", "Connection": "close"})
+
+    # ---- arm / disarm ----------------------------------------------------
+    @app.post("/api/arm")
+    async def set_arm(request: Request):
+        body = await request.json()
+        armed = monitor.set_armed(bool(body.get("armed")))
+        # persist so the state survives a restart
+        cfg_now = app.state.cfg
+        cfg_now.setdefault("arming", {})["armed"] = armed
+        save_config(app.state.config_path, cfg_now)
+        app.state.cfg = load_config(app.state.config_path)
+        return {"ok": True, "armed": armed}
 
     # ---- web push --------------------------------------------------------
     @app.get("/api/push/status")

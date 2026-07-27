@@ -169,6 +169,41 @@ tree that moves in the wind.
 | Power | Several USB cams + a Pi need a solid 3 A supply, or use a **powered** USB hub |
 | RTSP | Prefer the camera's **substream** (lower res) — decoding a 4 K main stream will peg the CPU |
 
+## Arming
+
+The **ARMED / DISARMED** button in the header is always visible. Disarmed, cameras keep
+streaming and the Live view works, but nothing is recorded and nothing notifies — for
+when you're home and don't want to be pinged by your own front door.
+
+Optionally auto-arm on a schedule (**Settings → Arming schedule**); overnight windows
+like `22:00 → 07:00` work correctly. Tapping the button overrides the schedule until the
+next scheduled change, so a manual disarm won't be undone a minute later.
+
+PiEYE also alerts you when a **camera goes down** and again when it recovers
+(`notify.alert_on_camera_down`) — a security camera that silently stops is worse than
+one you never installed.
+
+## Video clips
+
+Enable **Settings → Record a video clip for each event** to capture a few seconds either
+side of a trigger instead of a single frame. Pre-roll comes from a rolling buffer, so you
+see what happened *before* the motion started.
+
+```yaml
+storage:
+  clips:
+    enabled: true
+    pre_seconds: 4
+    post_seconds: 6
+    fps: 8
+```
+
+Frames are buffered as JPEGs (a 720p raw pre-roll would eat ~140 MB of RAM; the encoded
+version is a few MB), and the MP4 is written on a worker thread so capture never stalls.
+Events with a clip show a **▶ CLIP** badge and play inline. Clips are deleted along with
+their event by the retention sweep — but they're much larger than snapshots, so lower
+`retention_days` if you enable this on a small SD card.
+
 ## Tuning
 
 | Symptom | Fix in `config.yaml` |

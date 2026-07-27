@@ -15,8 +15,15 @@ DEFAULTS = {
         "classes_of_interest": ["person", "car", "truck", "bus", "bicycle",
                                 "motorcycle", "dog", "cat"],
     },
+    "arming": {
+        "armed": True,             # when false: live view still works, no alerts
+        "schedule_enabled": False,
+        "arm_at": "22:00",         # auto-arm at this local time
+        "disarm_at": "07:00",      # auto-disarm at this local time
+    },
     "notify": {
         "ntfy_enabled": True,
+        "alert_on_camera_down": True,   # push when a camera stops reporting
         "ntfy_server": "https://ntfy.sh",
         "ntfy_topic": "change-me",
         "priority": "high",
@@ -52,6 +59,12 @@ DEFAULTS = {
         "snapshot_dir": "data/snapshots",
         "retention_days": 14,
         "max_events": 5000,
+        "clips": {                 # short video around each event
+            "enabled": False,
+            "pre_seconds": 4,      # buffered before the trigger
+            "post_seconds": 6,     # recorded after
+            "fps": 8,
+        },
     },
     "loop_delay": 0.1,
 }

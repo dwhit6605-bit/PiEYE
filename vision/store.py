@@ -41,7 +41,21 @@ class EventStore:
                 created  REAL NOT NULL
             )
         """)
+        # migrate: `clip` column added after the first releases
+        cols = {r["name"] for r in self._db.execute("PRAGMA table_info(events)")}
+        if "clip" not in cols:
+            self._db.execute("ALTER TABLE events ADD COLUMN clip TEXT")
         self._db.commit()
+        self.clip_dir = os.path.join(os.path.dirname(os.path.abspath(db_path)), "clips")
+        os.makedirs(self.clip_dir, exist_ok=True)
+
+    def set_event_clip(self, event_id, filename):
+        with self._lock:
+            self._db.execute("UPDATE events SET clip = ? WHERE id = ?", (filename, event_id))
+            self._db.commit()
+
+    def clip_path(self, filename):
+        return os.path.join(self.clip_dir, os.path.basename(filename))
 
     # ---- web push subscriptions ----
     def add_push_sub(self, endpoint, sub_json, label=None, created=None):
@@ -108,6 +122,10 @@ class EventStore:
             path = os.path.join(self.snapshot_dir, row["snapshot"])
             if os.path.exists(path):
                 os.remove(path)
+        if row.get("clip"):
+            cpath = self.clip_path(row["clip"])
+            if os.path.exists(cpath):
+                os.remove(cpath)
         with self._lock:
             self._db.execute("DELETE FROM events WHERE id = ?", (event_id,))
             self._db.commit()
@@ -136,12 +154,12 @@ class EventStore:
             if retention_days and retention_days > 0:
                 cutoff = time.time() - retention_days * 86400
                 rows = self._db.execute(
-                    "SELECT id, snapshot FROM events WHERE ts < ?", (cutoff,)).fetchall()
+                    "SELECT id, snapshot, clip FROM events WHERE ts < ?", (cutoff,)).fetchall()
                 removed += rows
                 self._db.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
             if max_events and max_events > 0:
                 rows = self._db.execute(
-                    "SELECT id, snapshot FROM events WHERE id NOT IN "
+                    "SELECT id, snapshot, clip FROM events WHERE id NOT IN "
                     "(SELECT id FROM events ORDER BY ts DESC LIMIT ?)", (max_events,)).fetchall()
                 removed += rows
                 self._db.execute(
@@ -153,4 +171,8 @@ class EventStore:
                 p = os.path.join(self.snapshot_dir, r["snapshot"])
                 if os.path.exists(p):
                     os.remove(p)
+            if r["clip"]:
+                cp = self.clip_path(r["clip"])
+                if os.path.exists(cp):
+                    os.remove(cp)
         return len(removed)

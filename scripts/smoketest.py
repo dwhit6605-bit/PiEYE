@@ -154,6 +154,74 @@ with TestClient(app3) as c:
     assert r.status_code == 429, r.status_code
     print("PASS  rate-limit: locks out after 3 failures (correct pw -> 429)")
 
+# ---- arming schedule ----
+from vision import arming as varm  # noqa: E402
+from vision.monitor import Monitor  # noqa: E402
+
+assert varm.parse_hhmm("22:30", 0) == 22 * 60 + 30
+assert varm.parse_hhmm("nonsense", 123) == 123 and varm.parse_hhmm("25:00", 7) == 7
+print("PASS  arming: HH:MM parsing with fallback")
+
+# overnight window 22:00 -> 07:00
+for mins, want in [(23 * 60, True), (2 * 60, True), (6 * 60 + 59, True),
+                   (7 * 60, False), (12 * 60, False), (21 * 60 + 59, False)]:
+    got = varm.scheduled_armed(mins, "22:00", "07:00")
+    assert got is want, f"overnight {mins // 60:02d}:{mins % 60:02d} -> {got}, want {want}"
+# same-day window 09:00 -> 17:00
+for mins, want in [(8 * 60, False), (9 * 60, True), (16 * 60, True), (17 * 60, False)]:
+    assert varm.scheduled_armed(mins, "09:00", "17:00") is want
+assert varm.scheduled_armed(600, "08:00", "08:00") is None
+print("PASS  arming: schedule windows incl. overnight wrap and degenerate case")
+
+# disarming must suppress alerting
+_marm = Monitor.__new__(Monitor)
+_marm.armed = True
+_marm.status = {}
+assert Monitor.set_armed(_marm, False) is False and _marm.armed is False
+assert Monitor.set_armed(_marm, True) is True
+print("PASS  arming: set_armed toggles state")
+
+# ---- video clips ----
+from vision.clips import ClipRecorder  # noqa: E402
+
+clipdir = os.path.join(work, "clips")
+rec = ClipRecorder(clipdir, pre_seconds=1, post_seconds=1, fps=5)
+t = 1000.0
+# pre-roll: feed frames before anything happens
+for i in range(10):
+    rec.offer("cam", np.full((120, 160, 3), (i * 20) % 255, np.uint8), t)
+    t += 0.2
+assert len(rec._buf["cam"]) == 5, "pre-roll ring buffer should cap at pre_seconds*fps"
+done = []
+assert rec.start("cam", t, "test.mp4", on_done=done.append) is True
+assert rec.start("cam", t, "again.mp4") is False, "second start while recording must be refused"
+for i in range(10):                      # post-roll
+    t += 0.2
+    rec.offer("cam", np.full((120, 160, 3), 90, np.uint8), t)
+for _ in range(50):                      # writer runs on a thread
+    if done:
+        break
+    time.sleep(0.1)
+assert done == ["test.mp4"], f"on_done not called: {done}"
+clip_file = os.path.join(clipdir, "test.mp4")
+assert os.path.exists(clip_file) and os.path.getsize(clip_file) > 0
+cap = cv2.VideoCapture(clip_file)
+n = 0
+while True:
+    ok, _f = cap.read()
+    if not ok:
+        break
+    n += 1
+cap.release()
+assert n >= 5, f"clip should contain pre+post frames, got {n}"
+print(f"PASS  clips: pre/post buffering wrote a readable {n}-frame mp4")
+
+st3 = EventStore("data/events.db", "data/snaps")
+eid3 = st3.add_event(time.time(), "2026-07-27T03:00:00", "cam", "person", "m", jpg, 0.9)
+st3.set_event_clip(eid3, "test.mp4")
+assert st3.get_event(eid3)["clip"] == "test.mp4"
+print("PASS  clips: event row records the clip filename")
+
 # ---- detection zones ----
 from vision import zones as vz  # noqa: E402
 
@@ -217,7 +285,7 @@ mpath = os.path.join(work, "multi.yaml")
 with open(mpath, "w") as f:
     yaml.safe_dump(multi, f)
 
-from vision.monitor import Monitor  # noqa: E402
+
 from vision.config import load_config  # noqa: E402
 
 mon = Monitor(load_config(mpath), EventStore("data/events.db", "data/snaps"))

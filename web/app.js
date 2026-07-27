@@ -37,11 +37,25 @@ function clearLive() {
 // ---- status poll -------------------------------------------------------
 async function pollHealth() {
   const dot = document.getElementById("statusDot"), txt = document.getElementById("statusText");
+  const arm = document.getElementById("armBtn");
   try {
     state.health = await api("/api/health");
     const s = state.health.status;
     dot.className = "dot " + (s.error ? "err" : s.running ? "ok" : "");
     txt.textContent = s.error ? "error" : s.running ? `${s.cameras.length} cam · ${s.backend}${s.claude ? " · claude" : ""}` : "idle";
+    arm.hidden = false;
+    arm.className = "arm-btn " + (s.armed ? "on" : "off");
+    arm.textContent = s.armed ? "ARMED" : "DISARMED";
+    arm.title = s.armed ? "Alerts on — tap to disarm" : "Alerts off — tap to arm";
+    arm.onclick = async () => {
+      arm.disabled = true;
+      try {
+        const r = await api("/api/arm", { method: "POST", body: JSON.stringify({ armed: !s.armed }) });
+        toast(r.armed ? "Armed — alerts on" : "Disarmed — alerts off", "ok");
+      } catch (e) { toast(e.message, "err"); }
+      arm.disabled = false;
+      pollHealth();
+    };
   } catch (e) {
     dot.className = "dot err"; txt.textContent = "offline";
   }
@@ -121,7 +135,7 @@ async function loadEvents() {
     const card = el(`<div class="card event-card">
       ${ev.snapshot ? `<img loading="lazy" src="${snapUrl(ev.snapshot)}" alt="">` : ""}
       <div class="meta">
-        <span class="badge">${ev.camera}</span>
+        <span class="badge">${ev.camera}</span>${ev.clip ? ` <span class="badge clip">▶ CLIP</span>` : ""}
         <div class="msg">${escapeHtml(ev.message)}</div>
         <div class="time">${escapeHtml(ev.labels)} · ${fmtTime(ev.iso)}</div>
       </div></div>`);
@@ -129,9 +143,17 @@ async function loadEvents() {
     grid.appendChild(card);
   });
 }
+function clipUrl(file) { return `/api/clips/${encodeURIComponent(file)}`; }
+
 function openEvent(ev) {
   const c = document.getElementById("modalContent");
-  c.innerHTML = `${ev.snapshot ? `<img src="${snapUrl(ev.snapshot)}">` : ""}
+  // Prefer the clip when one was recorded; fall back to the still.
+  const media = ev.clip
+    ? `<video controls autoplay muted playsinline preload="metadata"
+              poster="${ev.snapshot ? snapUrl(ev.snapshot) : ""}"
+              src="${clipUrl(ev.clip)}" style="width:100%;display:block;background:#000"></video>`
+    : (ev.snapshot ? `<img src="${snapUrl(ev.snapshot)}">` : "");
+  c.innerHTML = `${media}
     <div class="detail">
       <h3>${escapeHtml(ev.labels)}</h3>
       <div class="kv">${escapeHtml(ev.message)}</div>
@@ -182,6 +204,17 @@ async function renderSettings() {
       <div class="field"><label>Classes of interest (comma separated)</label><input id="d_classes" value="${classes}"></div>
     </div>
 
+    <div class="section-title">Arming schedule</div>
+    <div class="card" style="padding:14px">
+      <div class="field inline"><input type="checkbox" id="a_sched" ${cfg.arming.schedule_enabled ? "checked" : ""}><label style="margin:0">Arm and disarm automatically</label></div>
+      <div class="row">
+        <div class="field"><label>Arm at</label><input type="time" id="a_on" value="${cfg.arming.arm_at || "22:00"}"></div>
+        <div class="field"><label>Disarm at</label><input type="time" id="a_off" value="${cfg.arming.disarm_at || "07:00"}"></div>
+      </div>
+      <div class="hint">Overnight windows are fine (e.g. 22:00 → 07:00). Tapping the
+        ARMED/DISARMED button overrides until the next scheduled change.</div>
+    </div>
+
     <div class="section-title">Push notifications (this device)</div>
     <div class="card" style="padding:14px">
       <div id="pushStatus" class="hint">Checking…</div>
@@ -221,6 +254,13 @@ async function renderSettings() {
         <div class="field"><label>Retention (days)</label><input type="number" id="s_ret" value="${cfg.storage.retention_days}"></div>
         <div class="field"><label>Max stored events</label><input type="number" id="s_max" value="${cfg.storage.max_events}"></div>
       </div>
+      <div class="field inline"><input type="checkbox" id="s_clips" ${(cfg.storage.clips || {}).enabled ? "checked" : ""}><label style="margin:0">Record a video clip for each event</label></div>
+      <div class="row">
+        <div class="field"><label>Seconds before</label><input type="number" id="s_pre" value="${(cfg.storage.clips || {}).pre_seconds ?? 4}"></div>
+        <div class="field"><label>Seconds after</label><input type="number" id="s_post" value="${(cfg.storage.clips || {}).post_seconds ?? 6}"></div>
+        <div class="field"><label>Clip FPS</label><input type="number" id="s_cfps" value="${(cfg.storage.clips || {}).fps ?? 8}"></div>
+      </div>
+      <div class="hint">Clips use more SD-card space — keep retention modest if enabled.</div>
       <div class="hint">Bind host/port changes (${cfg.server.host}:${cfg.server.port}) require a service restart.</div>
     </div>
 
@@ -278,6 +318,10 @@ async function saveSettings() {
   cfg.detection.backend = document.getElementById("d_back").value;
   cfg.detection.confidence = num("d_conf"); cfg.detection.cooldown_seconds = num("d_cool");
   cfg.detection.classes_of_interest = document.getElementById("d_classes").value.split(",").map(s => s.trim()).filter(Boolean);
+  cfg.arming = cfg.arming || {};
+  cfg.arming.schedule_enabled = document.getElementById("a_sched").checked;
+  cfg.arming.arm_at = document.getElementById("a_on").value || "22:00";
+  cfg.arming.disarm_at = document.getElementById("a_off").value || "07:00";
   cfg.notify.ntfy_enabled = document.getElementById("n_en").checked;
   cfg.notify.ntfy_server = document.getElementById("n_srv").value.trim();
   cfg.notify.ntfy_topic = document.getElementById("n_topic").value.trim();
@@ -286,6 +330,10 @@ async function saveSettings() {
   cfg.claude.enabled = document.getElementById("c_en").checked;
   cfg.claude.model = document.getElementById("c_model").value.trim();
   cfg.storage.retention_days = num("s_ret"); cfg.storage.max_events = num("s_max");
+  cfg.storage.clips = Object.assign({}, cfg.storage.clips, {
+    enabled: document.getElementById("s_clips").checked,
+    pre_seconds: num("s_pre"), post_seconds: num("s_post"), fps: num("s_cfps"),
+  });
   try {
     await api("/api/config", { method: "PUT", body: JSON.stringify(cfg) });
     toast("Saved — monitor reloaded", "ok"); pollHealth();
