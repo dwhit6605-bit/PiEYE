@@ -1,6 +1,6 @@
 // App-shell cache so the PWA installs and opens instantly. API + snapshots are
 // always fetched live (never cached) so events/live view stay fresh.
-const CACHE = "pv-shell-v2";
+const CACHE = "pv-shell-v3";
 const SHELL = ["/", "/index.html", "/styles.css", "/app.js", "/manifest.webmanifest", "/icons/icon.svg"];
 
 self.addEventListener("install", (e) => {
