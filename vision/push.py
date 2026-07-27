@@ -7,23 +7,40 @@ import base64
 import json
 
 
+def _b64url(raw):
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
 def generate_vapid_keys():
-    """Return (private_pem, public_key_b64url) for a fresh P-256 VAPID keypair."""
+    """Return (private_key_b64url, public_key_b64url) for a fresh P-256 keypair.
+
+    The private key is the RAW 32-byte scalar, base64url-encoded -- the standard
+    VAPID format. pywebpush hands string keys to Vapid.from_string(), which only
+    understands raw/DER, so a PEM here would fail to load at send time.
+    """
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ec
 
     key = ec.generate_private_key(ec.SECP256R1())
-    private_pem = key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption(),
-    ).decode()
+    raw_priv = key.private_numbers().private_value.to_bytes(32, "big")
     raw_pub = key.public_key().public_bytes(
         serialization.Encoding.X962,
         serialization.PublicFormat.UncompressedPoint,
     )
-    public_b64 = base64.urlsafe_b64encode(raw_pub).rstrip(b"=").decode()
-    return private_pem, public_b64
+    return _b64url(raw_priv), _b64url(raw_pub)
+
+
+def normalize_private_key(private_key):
+    """Migrate a previously stored PEM key to raw base64url, same keypair.
+
+    Early builds stored PKCS8 PEM, which pywebpush cannot load. Converting keeps
+    the identical key, so public key and existing browser subscriptions stay valid.
+    """
+    if not private_key or "-----BEGIN" not in private_key:
+        return private_key
+    from cryptography.hazmat.primitives import serialization
+    key = serialization.load_pem_private_key(private_key.encode(), password=None)
+    return _b64url(key.private_numbers().private_value.to_bytes(32, "big"))
 
 
 class WebPushSender:
@@ -33,9 +50,9 @@ class WebPushSender:
     automatically, so uninstalled/expired clients don't accumulate.
     """
 
-    def __init__(self, store, private_pem, subject="mailto:pieye@localhost"):
+    def __init__(self, store, private_key, subject="mailto:pieye@localhost"):
         self.store = store
-        self.private_pem = private_pem
+        self.private_key = normalize_private_key(private_key)
         self.subject = subject
 
     def send(self, title, body, url="/#events", snapshot=None, tag="pieye"):
@@ -57,7 +74,7 @@ class WebPushSender:
                 webpush(
                     subscription_info=json.loads(sub["sub_json"]),
                     data=payload,
-                    vapid_private_key=self.private_pem,
+                    vapid_private_key=self.private_key,
                     vapid_claims={"sub": self.subject},
                     timeout=10,
                 )

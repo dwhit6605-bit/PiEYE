@@ -233,8 +233,31 @@ print(f"PASS  multi-camera: bad camera isolated (opened={opened}, failed=['broke
 from vision import push as vpush  # noqa: E402
 
 priv, pub = vpush.generate_vapid_keys()
-assert "BEGIN PRIVATE KEY" in priv and len(pub) > 80
-print("PASS  web push: VAPID keypair generated")
+assert "-----" not in priv and len(priv) == 43 and len(pub) == 87
+# The key MUST load through py_vapid the way pywebpush does it, and must derive
+# the same public key we hand the browser -- otherwise pushes silently never send.
+from py_vapid import Vapid02  # noqa: E402
+from cryptography.hazmat.primitives import serialization as _ser  # noqa: E402
+import base64 as _b64  # noqa: E402
+
+_v = Vapid02.from_string(priv)
+_derived = _b64.urlsafe_b64encode(_v.public_key.public_bytes(
+    _ser.Encoding.X962, _ser.PublicFormat.UncompressedPoint)).rstrip(b"=").decode()
+assert _derived == pub, "derived public key must match the one sent to browsers"
+print("PASS  web push: VAPID keypair generated, loadable, and self-consistent")
+
+# legacy PEM keys must migrate to the same keypair (don't invalidate subscriptions)
+from cryptography.hazmat.primitives.asymmetric import ec as _ec  # noqa: E402
+
+_k = _ec.generate_private_key(_ec.SECP256R1())
+_pem = _k.private_bytes(_ser.Encoding.PEM, _ser.PrivateFormat.PKCS8,
+                        _ser.NoEncryption()).decode()
+_mig = Vapid02.from_string(vpush.normalize_private_key(_pem))
+assert _b64.urlsafe_b64encode(_mig.public_key.public_bytes(
+    _ser.Encoding.X962, _ser.PublicFormat.UncompressedPoint)).rstrip(b"=").decode() == \
+    _b64.urlsafe_b64encode(_k.public_key().public_bytes(
+        _ser.Encoding.X962, _ser.PublicFormat.UncompressedPoint)).rstrip(b"=").decode()
+print("PASS  web push: legacy PEM key migrates to the same keypair")
 
 st2 = EventStore("data/events.db", "data/snaps")
 st2.add_push_sub("https://push.example/abc", '{"endpoint":"https://push.example/abc"}', "test-ua")
@@ -268,8 +291,10 @@ with TestClient(app5) as c:
     # saving a redacted config must not wipe the real private key
     c.put("/api/config", json=got)
     disk = yaml.safe_load(open(os.path.join(work, "push.yaml")))
-    assert disk["notify"]["web_push"]["private_key"].startswith("-----BEGIN")
-    print("PASS  web push: PUT config preserves redacted private key")
+    saved_priv = disk["notify"]["web_push"]["private_key"]
+    assert saved_priv != "__unchanged__" and len(saved_priv) == 43, saved_priv
+    assert Vapid02.from_string(saved_priv), "persisted key must still be loadable"
+    print("PASS  web push: PUT config preserves a usable private key")
 
 # ---- ntfy can be disabled without failing validation ----
 from vision.config import validate_config  # noqa: E402

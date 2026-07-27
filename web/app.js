@@ -416,6 +416,12 @@ async function renderPush() {
   const sub = reg ? await reg.pushManager.getSubscription() : null;
 
   if (sub) {
+    // Self-heal: this device may hold a subscription the server never stored
+    // (interrupted enable, or the events DB was reset). Re-sending is an upsert.
+    try {
+      const r = await api("/api/push/subscribe", { method: "POST", body: JSON.stringify(sub.toJSON()) });
+      st.subscriptions = r.subscriptions;
+    } catch { /* keep whatever status we already have */ }
     box.innerHTML = `✅ Push is <strong>on</strong> for this device (${st.subscriptions} device(s) subscribed).`;
     show(0, 1, 1);
   } else {
@@ -431,10 +437,13 @@ async function renderPush() {
       const { public_key } = await api("/api/push/enable", { method: "POST" });
       const r = await navigator.serviceWorker.register("/sw.js");
       await navigator.serviceWorker.ready;
+      // A subscription bound to older VAPID keys can't be reused -- drop it first.
+      const existing = await r.pushManager.getSubscription();
+      if (existing) await existing.unsubscribe();
       const s = await r.pushManager.subscribe({
         userVisibleOnly: true, applicationServerKey: b64ToUint8(public_key) });
-      await api("/api/push/subscribe", { method: "POST", body: JSON.stringify(s.toJSON()) });
-      toast("Push enabled", "ok"); renderPush();
+      const res = await api("/api/push/subscribe", { method: "POST", body: JSON.stringify(s.toJSON()) });
+      toast(`Push enabled (${res.subscriptions} device(s))`, "ok"); renderPush();
     } catch (e) { toast(e.message || "Could not enable push", "err"); }
   };
   bOff.onclick = async () => {
@@ -446,8 +455,13 @@ async function renderPush() {
     } catch (e) { toast(e.message, "err"); }
   };
   bTest.onclick = async () => {
-    try { const r = await api("/api/push/test", { method: "POST" }); toast(`Test sent to ${r.sent} device(s)`, "ok"); }
-    catch (e) { toast(e.message, "err"); }
+    try {
+      const r = await api("/api/push/test", { method: "POST" });
+      if (r.sent > 0) { toast(`Test sent to ${r.sent} device(s)`, "ok"); return; }
+      toast(r.subscriptions ? "Push service rejected all devices — check the Pi's logs"
+                            : "No devices registered — press Disable then Enable", "err");
+      renderPush();
+    } catch (e) { toast(e.message, "err"); }
   };
 }
 
@@ -502,11 +516,13 @@ async function boot() {
   pollHealth();
   setInterval(pollHealth, 5000);
   if ("serviceWorker" in navigator) {
-    // When a new service worker takes control (i.e. the app was updated on the
-    // Pi), reload once so the fresh code is actually running.
+    // Reload when a NEW worker replaces an existing one (i.e. the app was updated
+    // on the Pi). Skip it on first-ever install: nothing stale is running, and
+    // reloading there would abort in-flight work such as push registration.
+    const hadController = !!navigator.serviceWorker.controller;
     let reloading = false;
     navigator.serviceWorker.addEventListener("controllerchange", () => {
-      if (reloading) return;
+      if (!hadController || reloading) return;
       reloading = true;
       location.reload();
     });

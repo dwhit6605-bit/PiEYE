@@ -262,8 +262,9 @@ def create_app(config_path):
             raise HTTPException(status_code=400, detail="web push is not enabled")
         sender = push_mod.WebPushSender(store, wp["private_key"],
                                         wp.get("subject", "mailto:pieye@localhost"))
+        before = len(store.list_push_subs())
         sent = sender.send("PiEYE test", "Push notifications are working.", url="/#events")
-        return {"ok": True, "sent": sent}
+        return {"ok": True, "sent": sent, "subscriptions": before}
 
     # ---- PWA static (mounted last so /api/* wins) ------------------------
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
