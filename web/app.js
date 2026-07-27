@@ -52,7 +52,8 @@ async function renderLive() {
   clearLive();
   await pollHealth();
   const cams = (state.health && state.health.status.cameras) || [];
-  if (!cams.length) {
+  const failed = (state.health && state.health.status.failed_cameras) || {};
+  if (!cams.length && !Object.keys(failed).length) {
     view.innerHTML = `<div class="empty"><div class="big">▦</div><p>No cameras reporting yet.<br>Check the Settings tab and the service logs.</p></div>`;
     return;
   }
@@ -64,6 +65,14 @@ async function renderLive() {
       <div class="meta"><span class="name">${cam}</span> <span class="badge live">● LIVE</span></div>
     </div>`);
     grid.appendChild(card);
+  });
+  Object.entries(failed).forEach(([cam, err]) => {
+    grid.appendChild(el(`<div class="card cam-card">
+      <div class="cam-down"><div class="big">⚠</div><div>camera unavailable</div></div>
+      <div class="meta"><span class="name">${escapeHtml(cam)}</span>
+        <span class="badge down">OFFLINE</span>
+        <div class="msg">${escapeHtml(err)}</div></div>
+    </div>`));
   });
 }
 

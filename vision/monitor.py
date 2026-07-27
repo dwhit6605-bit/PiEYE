@@ -62,10 +62,18 @@ class Monitor:
         with self._lock:
             cfg = self.cfg
         cams = []
+        failed = {}
         for c in cfg["cameras"]:
-            cam = Camera(c["id"], c["source"], c.get("rotate", 0),
-                         fourcc=c.get("fourcc"), width=c.get("width"),
-                         height=c.get("height")).open()
+            cam_id = c.get("id", "?")
+            try:
+                cam = Camera(cam_id, c["source"], c.get("rotate", 0),
+                             fourcc=c.get("fourcc"), width=c.get("width"),
+                             height=c.get("height")).open()
+            except Exception as e:
+                # One bad camera must not take down the others.
+                failed[cam_id] = str(e)
+                print(f"[monitor] camera '{cam_id}' unavailable: {e}", flush=True)
+                continue
             cams.append((cam, MotionDetector(**{k: cfg["motion"][k] for k in
                          ("min_area", "threshold", "warmup_frames") if k in cfg["motion"]})))
         detector = build_detector(cfg["detection"])
@@ -88,9 +96,11 @@ class Monitor:
             describer = ClaudeDescriber(cfg["claude"].get("model"))
         self.status.update({
             "cameras": [c.id for c, _ in cams],
+            "failed_cameras": failed,
             "backend": cfg["detection"].get("backend", "yolo"),
             "claude": bool(describer),
-            "error": None,
+            "error": (f"{len(failed)} camera(s) unavailable: "
+                      + "; ".join(f"{k} ({v})" for k, v in failed.items())) if failed else None,
         })
         return cfg, cams, detector, notifier, describer
 
@@ -127,14 +137,32 @@ class Monitor:
             max_events = cfg["storage"].get("max_events", 5000)
             last_alert = {}
             last_prune = 0
+            dead_reads = {}
+            last_retry = time.time()
+            retry_every = cfg["detection"].get("camera_retry_seconds", 60)
             print(f"[monitor] running: cams={self.status['cameras']} "
+                  f"failed={list(self.status.get('failed_cameras') or {})} "
                   f"backend={self.status['backend']} claude={self.status['claude']}", flush=True)
+
+            # Nothing opened at all -- wait and retry rather than spinning hot.
+            if not cams:
+                if self._stop.wait(min(retry_every, 15)):
+                    break
+                continue
 
             while not self._stop.is_set() and not self._reload.is_set():
                 for cam, motion in cams:
                     frame = cam.read()
                     if frame is None:
+                        # A camera that stops delivering (unplugged, crashed) gets
+                        # a rebuild so the rest keep running and it can recover.
+                        dead_reads[cam.id] = dead_reads.get(cam.id, 0) + 1
+                        if dead_reads[cam.id] == 150:
+                            print(f"[monitor] camera '{cam.id}' stopped delivering "
+                                  f"frames -- rebuilding", flush=True)
+                            self._reload.set()
                         continue
+                    dead_reads[cam.id] = 0
                     self._update_live(cam.id, frame)
 
                     moved, _ = motion.update(frame)
@@ -160,6 +188,13 @@ class Monitor:
                 if time.time() - last_prune > 600:
                     self.store.prune(retention, max_events)
                     last_prune = time.time()
+
+                # retry cameras that were unavailable at build time
+                if self.status.get("failed_cameras") and time.time() - last_retry > retry_every:
+                    last_retry = time.time()
+                    print("[monitor] retrying unavailable camera(s)", flush=True)
+                    self._reload.set()
+
                 time.sleep(loop_delay)
 
             self._teardown(cams)

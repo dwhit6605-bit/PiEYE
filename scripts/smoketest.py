@@ -154,6 +154,30 @@ with TestClient(app3) as c:
     assert r.status_code == 429, r.status_code
     print("PASS  rate-limit: locks out after 3 failures (correct pw -> 429)")
 
+# ---- multi-camera resilience: a bad camera must not kill the good ones ----
+multi = {
+    "cameras": [{"id": "good", "source": vid}, {"id": "broken", "source": "/dev/does-not-exist"}],
+    "detection": {"backend": "none"},
+    "notify": {"ntfy_enabled": False, "ntfy_topic": "x"},
+    "server": {"host": "127.0.0.1", "port": 8099},
+    "storage": {"db_path": "data/events.db", "snapshot_dir": "data/snaps"},
+}
+mpath = os.path.join(work, "multi.yaml")
+with open(mpath, "w") as f:
+    yaml.safe_dump(multi, f)
+
+from vision.monitor import Monitor  # noqa: E402
+from vision.config import load_config  # noqa: E402
+
+mon = Monitor(load_config(mpath), EventStore("data/events.db", "data/snaps"))
+_cfg, _cams, _det, _n, _d = mon._build()
+opened = [c.id for c, _ in _cams]
+assert "broken" in mon.status["failed_cameras"], "broken camera should be recorded as failed"
+assert mon.status["error"] and "broken" in mon.status["error"]
+for c, _ in _cams:
+    c.release()
+print(f"PASS  multi-camera: bad camera isolated (opened={opened}, failed=['broken'])")
+
 # ---- web push: keys, subscribe/unsubscribe, redaction ----
 from vision import push as vpush  # noqa: E402
 

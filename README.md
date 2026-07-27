@@ -108,6 +108,43 @@ sudo systemctl restart pieye.service    # after editing config.yaml by hand
 Manual / headless run (no service): `python -m vision.server --config config.yaml`,
 or without the web UI, `python -m vision.main --config config.yaml`.
 
+## Adding more cameras
+
+Add entries under `cameras:` (or use **Settings → Cameras → + Add camera**). Each needs a
+unique `id`; the `id` shows up in alert titles and as the Live/Events label.
+
+```yaml
+cameras:
+  - id: front-door          # USB webcam
+    source: 0
+    fourcc: MJPG
+    width: 1280
+    height: 720
+  - id: driveway            # second USB webcam -- find its index first
+    source: 2
+  - id: garage              # IP camera / NVR substream
+    source: "rtsp://user:pass@192.168.86.70:554/stream2"
+  - id: old-phone           # phone running an IP Webcam app
+    source: "http://192.168.86.90:8080/video"
+```
+
+Find USB indices with `v4l2-ctl --list-devices` — use the **first** `/dev/videoN` listed
+under the camera's name (a UVC cam claims two nodes; only the first delivers frames).
+
+**A failed camera no longer stops the others.** Cameras that can't be opened are skipped,
+listed on the Live tab as `OFFLINE` with the reason, and retried every
+`detection.camera_retry_seconds` (default 60). A camera that stops delivering frames
+mid-run (unplugged) triggers an automatic rebuild so it recovers when reconnected.
+
+### Practical limits on a Pi 4
+
+| Concern | Guidance |
+|---|---|
+| USB bandwidth | Use the **blue USB3** ports and `fourcc: MJPG`. Two 1080p raw (YUYV) cams will starve one controller |
+| CPU | Cameras are polled in one loop; YOLO runs only on motion. 2–3 cams is comfortable, 4+ wants `640x480` or a longer `cooldown_seconds` |
+| Power | Several USB cams + a Pi need a solid 3 A supply, or use a **powered** USB hub |
+| RTSP | Prefer the camera's **substream** (lower res) — decoding a 4 K main stream will peg the CPU |
+
 ## Tuning
 
 | Symptom | Fix in `config.yaml` |

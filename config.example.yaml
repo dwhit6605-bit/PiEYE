@@ -23,6 +23,7 @@ detection:
   model: yolo11n.pt     # nano model; auto-downloads once (~5 MB)
   confidence: 0.45      # detector's own floor for keeping a box
   cooldown_seconds: 60  # min gap between alerts per camera (stops alert spam)
+  camera_retry_seconds: 60   # how often to retry a camera that failed to open
   classes_of_interest:  # only these trigger an alert (COCO labels)
     - person
     - car
