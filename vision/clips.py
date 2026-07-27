@@ -6,11 +6,16 @@ only when a clip is actually written, which happens on a worker thread so the
 capture loop never stalls.
 """
 import os
+import shutil
+import subprocess
 import threading
 from collections import deque
 
 import cv2
 import numpy as np
+
+
+_FFMPEG = shutil.which("ffmpeg")
 
 
 class ClipRecorder:
@@ -68,18 +73,51 @@ class ClipRecorder:
 
     def _write(self, rec):
         frames, path = rec["frames"], os.path.join(self.clip_dir, rec["filename"])
+        if not frames:
+            return
+        ok = self._write_h264(frames, path) or self._write_cv2(frames, path)
+        if ok and rec.get("on_done"):
+            rec["on_done"](rec["filename"])
+
+    def _write_h264(self, frames, path):
+        """Encode H.264/yuv420p via ffmpeg -- the only format Safari/iOS will play.
+
+        The buffered frames are already JPEGs, so they pipe straight into ffmpeg's
+        mjpeg demuxer with no decode step.
+        """
+        if not _FFMPEG:
+            return False
+        cmd = [
+            _FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "image2pipe", "-vcodec", "mjpeg", "-r", str(self.fps), "-i", "-",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
+            "-pix_fmt", "yuv420p",                       # required by Safari
+            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",  # H.264 needs even dimensions
+            "-movflags", "+faststart",                   # play before fully downloaded
+            path,
+        ]
         try:
-            if not frames:
-                return
+            p = subprocess.run(cmd, input=b"".join(frames), capture_output=True, timeout=120)
+            if p.returncode != 0:
+                print(f"[clips] ffmpeg failed: {p.stderr.decode('utf-8', 'replace')[:300]}",
+                      flush=True)
+                return False
+            return os.path.exists(path) and os.path.getsize(path) > 0
+        except Exception as e:
+            print(f"[clips] ffmpeg error: {e}", flush=True)
+            return False
+
+    def _write_cv2(self, frames, path):
+        """Fallback when ffmpeg is unavailable. Note: mp4v will NOT play on iOS."""
+        try:
             first = cv2.imdecode(np.frombuffer(frames[0], np.uint8), cv2.IMREAD_COLOR)
             if first is None:
-                return
+                return False
             h, w = first.shape[:2]
-            writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"),
-                                     self.fps, (w, h))
+            writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), self.fps, (w, h))
             if not writer.isOpened():
                 print(f"[clips] could not open writer for {path}", flush=True)
-                return
+                return False
             for jpeg in frames:
                 img = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
                 if img is None:
@@ -88,10 +126,11 @@ class ClipRecorder:
                     img = cv2.resize(img, (w, h))
                 writer.write(img)
             writer.release()
-            if rec.get("on_done"):
-                rec["on_done"](rec["filename"])
+            print("[clips] wrote mp4v (ffmpeg missing) -- will not play on iOS", flush=True)
+            return os.path.exists(path) and os.path.getsize(path) > 0
         except Exception as e:
             print(f"[clips] write failed: {e}", flush=True)
+            return False
 
     def flush(self):
         """Finish any in-progress recordings (called on reload/shutdown)."""

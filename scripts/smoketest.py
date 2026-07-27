@@ -216,6 +216,24 @@ cap.release()
 assert n >= 5, f"clip should contain pre+post frames, got {n}"
 print(f"PASS  clips: pre/post buffering wrote a readable {n}-frame mp4")
 
+# iOS/Safari will only play H.264 in yuv420p -- mp4v renders as a green screen.
+import shutil as _sh  # noqa: E402
+import subprocess as _sp  # noqa: E402
+from vision.clips import _FFMPEG  # noqa: E402
+
+if _FFMPEG and _sh.which("ffprobe"):
+    probe = _sp.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                     "stream=codec_name,pix_fmt,width,height", "-of", "default=nw=1",
+                     clip_file], capture_output=True, text=True).stdout
+    assert "codec_name=h264" in probe, f"clips must be H.264 for iOS:\n{probe}"
+    assert "pix_fmt=yuv420p" in probe, f"clips must be yuv420p for Safari:\n{probe}"
+    _w = int([l for l in probe.splitlines() if l.startswith("width=")][0].split("=")[1])
+    _h = int([l for l in probe.splitlines() if l.startswith("height=")][0].split("=")[1])
+    assert _w % 2 == 0 and _h % 2 == 0, "H.264 requires even dimensions"
+    print("PASS  clips: encoded H.264/yuv420p with even dimensions (iOS-playable)")
+else:
+    print("SKIP  clips: ffmpeg/ffprobe unavailable, cannot verify H.264 output")
+
 st3 = EventStore("data/events.db", "data/snaps")
 eid3 = st3.add_event(time.time(), "2026-07-27T03:00:00", "cam", "person", "m", jpg, 0.9)
 st3.set_event_clip(eid3, "test.mp4")
