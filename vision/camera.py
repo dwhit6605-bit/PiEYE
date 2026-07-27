@@ -1,3 +1,5 @@
+import os
+
 import cv2
 
 _ROTATIONS = {
@@ -15,30 +17,55 @@ class Camera:
     fourcc="MJPG" (compressed) fixes that. These are ignored for RTSP/HTTP sources.
     """
 
-    def __init__(self, cam_id, source, rotate=0, fourcc=None, width=None, height=None):
+    def __init__(self, cam_id, source, rotate=0, fourcc=None, width=None, height=None,
+                 transport="tcp", timeout_seconds=8):
         self.id = cam_id
         self.source = source
         self.rotate = int(rotate) % 360
         self.fourcc = fourcc or None
         self.width = int(width) if width else None
         self.height = int(height) if height else None
+        self.transport = (transport or "tcp").lower()
+        self.timeout_seconds = int(timeout_seconds or 8)
         self.cap = None
+
+    @property
+    def is_network(self):
+        return isinstance(self.source, str) and "://" in self.source
+
+    def _ffmpeg_options(self):
+        """RTSP over UDP drops packets and smears frames; TCP is far more reliable.
+        A timeout matters even more -- without one a dead camera blocks the whole
+        capture loop, since cameras are polled from a single thread."""
+        us = self.timeout_seconds * 1_000_000
+        opts = [f"stimeout;{us}", f"timeout;{us}"]
+        if str(self.source).lower().startswith("rtsp://"):
+            opts.insert(0, f"rtsp_transport;{self.transport}")
+        return "|".join(opts)
 
     def open(self):
         # Use the V4L2 backend explicitly for local device indices (Linux/Pi).
         if isinstance(self.source, int):
             self.cap = cv2.VideoCapture(self.source, cv2.CAP_V4L2)
         else:
-            self.cap = cv2.VideoCapture(self.source)
+            # OpenCV reads this env var when the capture is constructed.
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = self._ffmpeg_options()
+            self.cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
         if not self.cap.isOpened():
             raise RuntimeError(f"Cannot open camera '{self.id}' (source={self.source!r})")
-        # FOURCC must be set before width/height for most UVC drivers.
-        if self.fourcc:
-            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*self.fourcc))
-        if self.width:
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        if self.height:
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        if self.is_network:
+            # Keep only the newest frame; otherwise reads return stale buffered
+            # frames and motion detection lags seconds behind reality.
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        # Capture-format settings apply to local UVC devices only; forcing them on
+        # a network stream can break the decode. FOURCC must precede width/height.
+        if not self.is_network:
+            if self.fourcc:
+                self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*self.fourcc))
+            if self.width:
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+            if self.height:
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         return self
 
     def read(self):

@@ -154,6 +154,24 @@ with TestClient(app3) as c:
     assert r.status_code == 429, r.status_code
     print("PASS  rate-limit: locks out after 3 failures (correct pw -> 429)")
 
+# ---- RTSP / network cameras ----
+from vision.camera import Camera  # noqa: E402
+
+_rt = Camera("c", "rtsp://192.0.2.1:8554/stream0", timeout_seconds=3)
+assert _rt.is_network and not Camera("l", 0).is_network
+_opts = _rt._ffmpeg_options()
+assert "rtsp_transport;tcp" in _opts and "stimeout;3000000" in _opts, _opts
+assert "rtsp_transport;udp" in Camera("u", "rtsp://x/y", transport="udp")._ffmpeg_options()
+_t0 = time.time()
+try:
+    _rt.open()
+    raise AssertionError("unreachable RTSP host should not open")
+except RuntimeError:
+    pass
+# cameras share one thread, so a dead stream must not stall the loop
+assert time.time() - _t0 < 25, "dead RTSP camera blocked for too long"
+print("PASS  rtsp: tcp transport, buffer trim, and fail-fast timeout")
+
 # ---- arming schedule ----
 from vision import arming as varm  # noqa: E402
 from vision.monitor import Monitor  # noqa: E402

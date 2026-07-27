@@ -13,6 +13,11 @@ cameras:
     # zone: [[0.15,0.25],[0.75,0.2],[0.85,0.85],[0.1,0.75]]  # optional detection zone (Settings -> Set zone)
   # - id: back-yard
   #   source: 1
+  # RTSP / IP camera. Wyze v3 with official RTSP firmware uses port 554 + /live:
+  # - id: garage
+  #   source: "rtsp://user:pass@192.168.86.20:554/live"
+  #   transport: tcp        # tcp (default) is far more reliable than udp
+  #   timeout_seconds: 8    # fail fast so a dead camera can't stall the loop
 
 motion:
   min_area: 3000        # px of change to count as motion. Raise if it's twitchy

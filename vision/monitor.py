@@ -109,7 +109,9 @@ class Monitor:
             try:
                 cam = Camera(cam_id, c["source"], c.get("rotate", 0),
                              fourcc=c.get("fourcc"), width=c.get("width"),
-                             height=c.get("height")).open()
+                             height=c.get("height"),
+                             transport=c.get("transport", "tcp"),
+                             timeout_seconds=c.get("timeout_seconds", 8)).open()
             except Exception as e:
                 # One bad camera must not take down the others.
                 failed[cam_id] = str(e)
