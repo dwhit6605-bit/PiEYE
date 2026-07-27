@@ -279,11 +279,11 @@ def create_app(config_path):
         wp = app.state.cfg["notify"].get("web_push", {})
         if not (wp.get("enabled") and wp.get("private_key")):
             raise HTTPException(status_code=400, detail="web push is not enabled")
-        sender = push_mod.WebPushSender(store, wp["private_key"],
-                                        wp.get("subject", "mailto:pieye@localhost"))
+        sender = push_mod.WebPushSender(store, wp["private_key"], wp.get("subject"))
         before = len(store.list_push_subs())
         sent = sender.send("PiEYE test", "Push notifications are working.", url="/#events")
-        return {"ok": True, "sent": sent, "subscriptions": before}
+        return {"ok": True, "sent": sent, "subscriptions": before,
+                "errors": getattr(sender, "last_errors", [])}
 
     # ---- PWA static (mounted last so /api/* wins) ------------------------
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

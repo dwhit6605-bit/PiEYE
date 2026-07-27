@@ -30,7 +30,9 @@ DEFAULTS = {
         "min_confidence_to_alert": 0.5,
         "web_push": {
             "enabled": False,
-            "subject": "mailto:pieye@localhost",
+            # VAPID contact claim; must be a real mailto: or https: URI or push
+            # services (Apple especially) reject the JWT with 403.
+            "subject": "https://github.com/dwhit6605-bit/PiEYE",
             "public_key": None,      # auto-generated when enabled
             "private_key": None,     # secret -- redacted from the API
         },

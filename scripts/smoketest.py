@@ -345,6 +345,16 @@ assert _b64.urlsafe_b64encode(_mig.public_key.public_bytes(
         _ser.Encoding.X962, _ser.PublicFormat.UncompressedPoint)).rstrip(b"=").decode()
 print("PASS  web push: legacy PEM key migrates to the same keypair")
 
+# VAPID `sub` must be a contactable mailto:/https: URI or Apple returns 403.
+assert vpush.normalize_subject("mailto:pieye@localhost") == vpush.DEFAULT_SUBJECT
+assert vpush.normalize_subject("") == vpush.DEFAULT_SUBJECT
+assert vpush.normalize_subject(None) == vpush.DEFAULT_SUBJECT
+assert vpush.normalize_subject("nonsense") == vpush.DEFAULT_SUBJECT
+assert vpush.normalize_subject("mailto:me@example.com") == "mailto:me@example.com"
+assert vpush.normalize_subject("me@example.com") == "mailto:me@example.com"
+assert vpush.normalize_subject("https://pieye.example.com") == "https://pieye.example.com"
+print("PASS  web push: VAPID subject normalization rejects uncontactable values")
+
 st2 = EventStore("data/events.db", "data/snaps")
 st2.add_push_sub("https://push.example/abc", '{"endpoint":"https://push.example/abc"}', "test-ua")
 assert len(st2.list_push_subs()) == 1

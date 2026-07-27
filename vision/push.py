@@ -30,6 +30,32 @@ def generate_vapid_keys():
     return _b64url(raw_priv), _b64url(raw_pub)
 
 
+#: RFC 8292 requires the VAPID `sub` claim to be a contactable mailto: or https:
+#: URI. Apple's push service rejects anything else with 403 -- notably the old
+#: `mailto:pieye@localhost` default, since localhost is not contactable.
+DEFAULT_SUBJECT = "https://github.com/dwhit6605-bit/PiEYE"
+
+
+def normalize_subject(subject):
+    """Return a VAPID `sub` the push services will accept."""
+    s = (subject or "").strip()
+    if not s:
+        return DEFAULT_SUBJECT
+    if s.startswith("https://"):
+        return s
+    if s.startswith("mailto:"):
+        addr = s[len("mailto:"):]
+        # needs a real, routable-looking domain: user@host.tld
+        if "@" in addr:
+            domain = addr.rsplit("@", 1)[1]
+            if "." in domain and "localhost" not in domain:
+                return s
+        return DEFAULT_SUBJECT
+    if "@" in s and "." in s.rsplit("@", 1)[1]:   # bare email address
+        return f"mailto:{s}"
+    return DEFAULT_SUBJECT
+
+
 def normalize_private_key(private_key):
     """Migrate a previously stored PEM key to raw base64url, same keypair.
 
@@ -50,10 +76,10 @@ class WebPushSender:
     automatically, so uninstalled/expired clients don't accumulate.
     """
 
-    def __init__(self, store, private_key, subject="mailto:pieye@localhost"):
+    def __init__(self, store, private_key, subject=None):
         self.store = store
         self.private_key = normalize_private_key(private_key)
-        self.subject = subject
+        self.subject = normalize_subject(subject)
 
     def send(self, title, body, url="/#events", snapshot=None, tag="pieye"):
         try:
@@ -69,6 +95,7 @@ class WebPushSender:
         })
 
         sent = 0
+        self.last_errors = []
         for sub in self.store.list_push_subs():
             try:
                 webpush(
@@ -84,8 +111,21 @@ class WebPushSender:
                 if status in (404, 410):
                     self.store.delete_push_sub(sub["endpoint"])
                     print(f"[push] pruned expired subscription ({status})", flush=True)
-                else:
-                    print(f"[push] send failed: {e}", flush=True)
+                    continue
+                # The status alone is rarely enough -- the body says WHY.
+                body = ""
+                try:
+                    body = (e.response.text or "")[:300]
+                except Exception:
+                    pass
+                host = sub["endpoint"].split("/")[2] if "://" in sub["endpoint"] else "?"
+                print(f"[push] send failed ({status}) to {host}: {body or e}", flush=True)
+                self.last_errors.append(f"{status} from {host}: {body[:120] or 'no detail'}")
+                if status == 403:
+                    print(f"[push] 403 usually means the VAPID 'sub' claim is rejected "
+                          f"(currently {self.subject!r}) or the subscription was made "
+                          f"with a different key -- re-enable push on the device.",
+                          flush=True)
             except Exception as e:  # never let a push error break an alert
                 print(f"[push] send error: {e}", flush=True)
         return sent

@@ -132,8 +132,7 @@ class Monitor:
         pusher = None
         if wp.get("enabled") and wp.get("private_key"):
             from .push import WebPushSender
-            pusher = WebPushSender(self.store, wp["private_key"],
-                                   wp.get("subject", "mailto:pieye@localhost"))
+            pusher = WebPushSender(self.store, wp["private_key"], wp.get("subject"))
         self._pusher = pusher
         self._notifier = notifier
 

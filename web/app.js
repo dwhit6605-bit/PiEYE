@@ -233,7 +233,11 @@ async function renderSettings() {
         <button class="btn-ghost" id="pushDisable" hidden>Disable</button>
         <button class="btn-ghost" id="pushTest" hidden>Send test</button>
       </div>
-      <div class="hint" style="margin-top:8px">Native browser notifications — no third-party app.
+      <div class="field" style="margin-top:12px"><label>VAPID contact (your email or an https URL)</label>
+        <input id="p_subject" value="${escapeHtml((cfg.notify.web_push || {}).subject || "")}" placeholder="you@example.com">
+        <div class="hint">Push services — Apple especially — reject notifications when this
+          isn't a real contact address.</div></div>
+      <div class="hint">Native browser notifications — no third-party app.
         Requires HTTPS; on iPhone, add PiEYE to your Home Screen first.</div>
     </div>
 
@@ -337,6 +341,8 @@ async function saveSettings() {
   cfg.notify.ntfy_topic = document.getElementById("n_topic").value.trim();
   cfg.notify.priority = document.getElementById("n_pri").value;
   cfg.notify.min_confidence_to_alert = num("n_min");
+  cfg.notify.web_push = Object.assign({}, cfg.notify.web_push,
+    { subject: document.getElementById("p_subject").value.trim() });
   cfg.claude.enabled = document.getElementById("c_en").checked;
   cfg.claude.model = document.getElementById("c_model").value.trim();
   cfg.storage.retention_days = num("s_ret"); cfg.storage.max_events = num("s_max");
@@ -516,8 +522,9 @@ async function renderPush() {
     try {
       const r = await api("/api/push/test", { method: "POST" });
       if (r.sent > 0) { toast(`Test sent to ${r.sent} device(s)`, "ok"); return; }
-      toast(r.subscriptions ? "Push service rejected all devices — check the Pi's logs"
-                            : "No devices registered — press Disable then Enable", "err");
+      toast(r.errors && r.errors.length ? r.errors[0]
+            : (r.subscriptions ? "Push service rejected all devices — check the Pi's logs"
+                               : "No devices registered — press Disable then Enable"), "err");
       renderPush();
     } catch (e) { toast(e.message, "err"); }
   };
