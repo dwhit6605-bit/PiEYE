@@ -7,6 +7,9 @@ cameras:
   - id: front-door      # shows up in the alert title
     source: 0           # /dev/video0 -> 0, /dev/video1 -> 1, or an "rtsp://..." URL
     rotate: 0           # 0 / 90 / 180 / 270 if the cam is mounted rotated
+    fourcc: MJPG        # most USB webcams need MJPG; raw YUYV can starve USB bandwidth
+    width: 1280         # capture resolution (optional)
+    height: 720
   # - id: back-yard
   #   source: 1
 

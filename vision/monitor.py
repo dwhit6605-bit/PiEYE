@@ -63,7 +63,9 @@ class Monitor:
             cfg = self.cfg
         cams = []
         for c in cfg["cameras"]:
-            cam = Camera(c["id"], c["source"], c.get("rotate", 0)).open()
+            cam = Camera(c["id"], c["source"], c.get("rotate", 0),
+                         fourcc=c.get("fourcc"), width=c.get("width"),
+                         height=c.get("height")).open()
             cams.append((cam, MotionDetector(**{k: cfg["motion"][k] for k in
                          ("min_area", "threshold", "warmup_frames") if k in cfg["motion"]})))
         detector = build_detector(cfg["detection"])
