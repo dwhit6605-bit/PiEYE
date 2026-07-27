@@ -136,6 +136,30 @@ listed on the Live tab as `OFFLINE` with the reason, and retried every
 `detection.camera_retry_seconds` (default 60). A camera that stops delivering frames
 mid-run (unplugged) triggers an automatic rebuild so it recovers when reconnected.
 
+### Detection zones (per camera)
+
+Watch only part of a camera's view — the porch but not the street, the driveway but
+not the neighbour's yard. In **Settings → Cameras**, press **Set zone**, then tap
+points on the live frame to draw a polygon. Motion outside it is ignored, and
+detections only count when the **bottom-centre** of the box (where a person meets the
+ground) falls inside.
+
+Points are stored normalized (`0..1`), so a zone keeps its meaning if you change
+capture resolution:
+
+```yaml
+cameras:
+  - id: front-door
+    source: 0
+    zone: [[0.15, 0.25], [0.75, 0.20], [0.85, 0.85], [0.10, 0.75]]
+```
+
+Fewer than 3 points (or no `zone:` key) means the whole frame is watched. The active
+zone is outlined faintly on saved snapshots so you can see what was armed.
+
+This is the single most effective fix for false alerts from a road, a footpath, or a
+tree that moves in the wind.
+
 ### Practical limits on a Pi 4
 
 | Concern | Guidance |

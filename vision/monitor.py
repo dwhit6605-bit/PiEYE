@@ -4,6 +4,7 @@ from datetime import datetime
 
 import cv2
 
+from . import zones
 from .camera import Camera
 from .motion import MotionDetector
 from .detector import build_detector, annotate
@@ -28,6 +29,7 @@ class Monitor:
         self.latest_jpeg = {}       # camera_id -> jpeg bytes (for the Live tab)
         self._last_live_encode = {}
         self.live_fps = 10
+        self._zones = {}            # camera_id -> normalized polygon (or None)
         self._viewers = 0           # active MJPEG stream clients
         self._viewers_lock = threading.Lock()
         self.status = {"running": False, "cameras": [], "backend": None, "claude": False,
@@ -74,8 +76,12 @@ class Monitor:
                 failed[cam_id] = str(e)
                 print(f"[monitor] camera '{cam_id}' unavailable: {e}", flush=True)
                 continue
-            cams.append((cam, MotionDetector(**{k: cfg["motion"][k] for k in
-                         ("min_area", "threshold", "warmup_frames") if k in cfg["motion"]})))
+            zone = c.get("zone")
+            self._zones[cam_id] = zone
+            cams.append((cam, MotionDetector(
+                zone=zone,
+                **{k: cfg["motion"][k] for k in
+                   ("min_area", "threshold", "warmup_frames") if k in cfg["motion"]})))
         detector = build_detector(cfg["detection"])
         self.live_fps = cfg["server"].get("live_fps", 10)
         n = cfg["notify"]
@@ -175,9 +181,12 @@ class Monitor:
                     interesting = []
                     if detector is not None:
                         dets = detector.detect(frame)
+                        zone = self._zones.get(cam.id)
+                        h, w = frame.shape[:2]
                         interesting = [d for d in dets
                                        if (not interest or d.label in interest)
-                                       and d.confidence >= min_conf]
+                                       and d.confidence >= min_conf
+                                       and zones.detection_in_zone(zone, d, w, h)]
                         if not interesting:
                             continue
 
@@ -213,6 +222,7 @@ class Monitor:
             self._last_live_encode[cam_id] = now
 
     def _handle_alert(self, cam, frame, interesting, describer, notifier):
+        zones.draw_outline(frame, self._zones.get(cam.id))
         annotate(frame, interesting)
         labels = ", ".join(sorted({d.label for d in interesting})) or "motion"
         max_conf = max((d.confidence for d in interesting), default=None)

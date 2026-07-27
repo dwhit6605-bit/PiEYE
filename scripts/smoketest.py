@@ -154,6 +154,57 @@ with TestClient(app3) as c:
     assert r.status_code == 429, r.status_code
     print("PASS  rate-limit: locks out after 3 failures (correct pw -> 429)")
 
+# ---- detection zones ----
+from vision import zones as vz  # noqa: E402
+
+
+class _Det:
+    def __init__(self, box):
+        self.box = box
+
+
+assert not vz.is_valid(None) and not vz.is_valid([[0, 0], [1, 1]])
+assert vz.is_valid([[0, 0], [1, 0], [1, 1]])
+print("PASS  zones: validity requires >= 3 points")
+
+# left half of a 640x480 frame
+left = [[0.0, 0.0], [0.5, 0.0], [0.5, 1.0], [0.0, 1.0]]
+mask = vz.build_mask(left, 640, 480)
+assert mask.shape == (480, 640)
+assert mask[240, 100] == 255 and mask[240, 500] == 0, "mask must cover only the left half"
+print("PASS  zones: mask rasterizes the polygon correctly")
+
+assert vz.contains_point(left, 100, 240, 640, 480) is True
+assert vz.contains_point(left, 500, 240, 640, 480) is False
+assert vz.contains_point(None, 500, 240, 640, 480) is True, "no zone => everything counts"
+print("PASS  zones: point-in-zone (and no-zone allows all)")
+
+# anchor is the bottom-centre of the box
+inside = _Det((80, 100, 200, 300))     # centre x=140 -> left half
+outside = _Det((400, 100, 600, 300))   # centre x=500 -> right half
+assert vz.detection_in_zone(left, inside, 640, 480) is True
+assert vz.detection_in_zone(left, outside, 640, 480) is False
+assert vz.detection_in_zone(None, outside, 640, 480) is True
+print("PASS  zones: detections filtered by bottom-centre anchor")
+
+# motion outside the zone must not trigger
+from vision.motion import MotionDetector  # noqa: E402
+
+md = MotionDetector(min_area=50, threshold=25, warmup_frames=0, zone=left)
+base = np.zeros((480, 640, 3), np.uint8)
+md.update(base)
+right_blob = base.copy()
+right_blob[200:300, 450:600] = 255          # big change, RIGHT half (outside zone)
+moved, _ = md.update(right_blob)
+assert moved is False, "motion outside the zone must be ignored"
+md2 = MotionDetector(min_area=50, threshold=25, warmup_frames=0, zone=left)
+md2.update(base)
+left_blob = base.copy()
+left_blob[200:300, 40:200] = 255            # same change, LEFT half (inside zone)
+moved2, _ = md2.update(left_blob)
+assert moved2 is True, "motion inside the zone must trigger"
+print("PASS  zones: motion masked — outside ignored, inside triggers")
+
 # ---- multi-camera resilience: a bad camera must not kill the good ones ----
 multi = {
     "cameras": [{"id": "good", "source": vid}, {"id": "broken", "source": "/dev/does-not-exist"}],

@@ -10,6 +10,7 @@ cameras:
     fourcc: MJPG        # most USB webcams need MJPG; raw YUYV can starve USB bandwidth
     width: 1280         # capture resolution (optional)
     height: 720
+    # zone: [[0.15,0.25],[0.75,0.2],[0.85,0.85],[0.1,0.75]]  # optional detection zone (Settings -> Set zone)
   # - id: back-yard
   #   source: 1
 

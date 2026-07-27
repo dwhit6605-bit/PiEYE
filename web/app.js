@@ -250,13 +250,17 @@ function renderCamRows() {
   const wrap = document.getElementById("camList");
   wrap.innerHTML = "";
   state.cfg.cameras.forEach((c, i) => {
+    const pts = Array.isArray(c.zone) ? c.zone.length : 0;
     const row = el(`<div class="cam-row">
       <input value="${c.id}" placeholder="name" data-i="${i}" data-k="id">
       <input value="${c.source}" placeholder="index or rtsp url" data-i="${i}" data-k="source">
       <select data-i="${i}" data-k="rotate">${[0,90,180,270].map(r => `<option ${c.rotate==r?"selected":""}>${r}</option>`).join("")}</select>
+      <button class="btn-ghost zone" data-i="${i}">${pts >= 3 ? `Zone (${pts})` : "Set zone"}</button>
       <button class="btn-danger del" data-i="${i}">✕</button></div>`);
     wrap.appendChild(row);
   });
+  wrap.querySelectorAll(".zone").forEach(b => b.onclick = e =>
+    openZoneEditor(parseInt(e.target.dataset.i)));
   wrap.querySelectorAll("input,select").forEach(inp => inp.onchange = e => {
     const { i, k } = e.target.dataset; let v = e.target.value;
     if (k === "rotate") v = parseInt(v);
@@ -300,6 +304,82 @@ async function renderAccount() {
     box.innerHTML = `Login is <strong>disabled</strong> — the UI is open to anyone on the network. ` +
       `Enable it on the Pi with <code>python -m vision.set_password</code>.`;
   }
+}
+
+// ---- detection zone editor --------------------------------------------
+// Points are stored normalized (0..1) so a zone survives resolution changes.
+function openZoneEditor(idx) {
+  const cam = state.cfg.cameras[idx];
+  let pts = Array.isArray(cam.zone) ? cam.zone.map(p => [+p[0], +p[1]]) : [];
+
+  document.getElementById("modalContent").innerHTML = `
+    <div class="detail">
+      <h3>Detection zone — ${escapeHtml(cam.id)}</h3>
+      <div class="kv">Tap to add points. Only motion <strong>inside</strong> the shape
+        triggers alerts. Fewer than 3 points = watch the whole frame.</div>
+    </div>
+    <div class="zone-wrap" id="zoneWrap">
+      <img id="zoneImg" alt="" src="/api/cameras/${encodeURIComponent(cam.id)}/live.jpg?ts=${Date.now()}">
+      <canvas id="zoneCanvas"></canvas>
+    </div>
+    <div class="detail">
+      <div class="kv" id="zoneInfo"></div>
+      <div class="actions" style="position:static">
+        <button class="btn-ghost" id="zUndo">Undo</button>
+        <button class="btn-ghost" id="zClear">Clear</button>
+        <button class="btn-primary" id="zSave">Use zone</button>
+      </div>
+    </div>`;
+  showModal();
+
+  const img = document.getElementById("zoneImg");
+  const cv = document.getElementById("zoneCanvas");
+  const info = document.getElementById("zoneInfo");
+  const ctx = cv.getContext("2d");
+
+  const fit = () => { cv.width = img.clientWidth; cv.height = img.clientHeight; draw(); };
+  function draw() {
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    info.textContent = pts.length >= 3
+      ? `${pts.length} points — zone active`
+      : `${pts.length} point(s) — need at least 3 (currently whole frame)`;
+    if (!pts.length) return;
+    const P = pts.map(([x, y]) => [x * cv.width, y * cv.height]);
+    ctx.beginPath();
+    ctx.moveTo(P[0][0], P[0][1]);
+    P.slice(1).forEach(p => ctx.lineTo(p[0], p[1]));
+    if (P.length >= 3) ctx.closePath();
+    ctx.fillStyle = "rgba(76,141,255,.25)";
+    ctx.strokeStyle = "#4c8dff";
+    ctx.lineWidth = 2;
+    if (P.length >= 3) ctx.fill();
+    ctx.stroke();
+    P.forEach(([x, y], i) => {
+      ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = i === 0 ? "#35c28f" : "#4c8dff"; ctx.fill();
+      ctx.strokeStyle = "#0f1216"; ctx.lineWidth = 2; ctx.stroke();
+    });
+  }
+  cv.onclick = (e) => {
+    const r = cv.getBoundingClientRect();
+    pts.push([ (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height ]);
+    draw();
+  };
+  document.getElementById("zUndo").onclick = () => { pts.pop(); draw(); };
+  document.getElementById("zClear").onclick = () => { pts = []; draw(); };
+  document.getElementById("zSave").onclick = () => {
+    if (pts.length && pts.length < 3) { toast("Need at least 3 points (or Clear)", "err"); return; }
+    // round to 4dp so config.yaml stays readable
+    if (pts.length >= 3) cam.zone = pts.map(([x, y]) => [+x.toFixed(4), +y.toFixed(4)]);
+    else delete cam.zone;
+    closeModal(); renderCamRows();
+    toast("Zone set — press Save & apply to activate", "ok");
+  };
+
+  if (img.complete && img.naturalWidth) fit();
+  img.onload = fit;
+  img.onerror = () => { info.textContent = "No live frame available for this camera."; fit(); };
+  window.addEventListener("resize", fit, { once: true });
 }
 
 // ---- web push ----------------------------------------------------------
