@@ -13,10 +13,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install runtime deps (no torch)
+      - name: Install runtime deps (everything except torch/ultralytics)
         run: |
           python -m pip install --upgrade pip
-          pip install fastapi "uvicorn[standard]" pyyaml numpy opencv-python-headless requests httpx
+          # Mirror requirements.txt minus ultralytics (torch is far too heavy for CI),
+          # plus httpx for fastapi's TestClient.
+          grep -viE '^\s*(ultralytics|#)' requirements.txt > ci-requirements.txt
+          pip install -r ci-requirements.txt httpx
       - name: Byte-compile
         run: python -m py_compile vision/*.py
       - name: Smoke test (store + API + auth)
