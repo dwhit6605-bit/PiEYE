@@ -162,6 +162,9 @@ assert _rt.is_network and not Camera("l", 0).is_network
 _opts = _rt._ffmpeg_options()
 assert "rtsp_transport;tcp" in _opts and "stimeout;3000000" in _opts, _opts
 assert "rtsp_transport;udp" in Camera("u", "rtsp://x/y", transport="udp")._ffmpeg_options()
+_s = Camera("s", "rtsps://x/y")._ffmpeg_options()
+assert "tls_verify;0" in _s and "rtsp_transport;tcp" in _s, _s
+assert "tls_verify" not in Camera("s", "rtsps://x/y", verify_tls=True)._ffmpeg_options()
 _t0 = time.time()
 try:
     _rt.open()

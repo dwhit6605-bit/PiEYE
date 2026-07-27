@@ -111,7 +111,8 @@ class Monitor:
                              fourcc=c.get("fourcc"), width=c.get("width"),
                              height=c.get("height"),
                              transport=c.get("transport", "tcp"),
-                             timeout_seconds=c.get("timeout_seconds", 8)).open()
+                             timeout_seconds=c.get("timeout_seconds", 8),
+                             verify_tls=c.get("verify_tls", False)).open()
             except Exception as e:
                 # One bad camera must not take down the others.
                 failed[cam_id] = str(e)

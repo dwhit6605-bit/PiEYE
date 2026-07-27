@@ -18,7 +18,7 @@ class Camera:
     """
 
     def __init__(self, cam_id, source, rotate=0, fourcc=None, width=None, height=None,
-                 transport="tcp", timeout_seconds=8):
+                 transport="tcp", timeout_seconds=8, verify_tls=False):
         self.id = cam_id
         self.source = source
         self.rotate = int(rotate) % 360
@@ -27,6 +27,7 @@ class Camera:
         self.height = int(height) if height else None
         self.transport = (transport or "tcp").lower()
         self.timeout_seconds = int(timeout_seconds or 8)
+        self.verify_tls = bool(verify_tls)
         self.cap = None
 
     @property
@@ -39,8 +40,13 @@ class Camera:
         capture loop, since cameras are polled from a single thread."""
         us = self.timeout_seconds * 1_000_000
         opts = [f"stimeout;{us}", f"timeout;{us}"]
-        if str(self.source).lower().startswith("rtsp://"):
+        src = str(self.source).lower()
+        if src.startswith("rtsp://") or src.startswith("rtsps://"):
             opts.insert(0, f"rtsp_transport;{self.transport}")
+        if src.startswith("rtsps://") and not self.verify_tls:
+            # Cameras (Wyze included) ship self-signed certs; verification would
+            # reject every stream.
+            opts.append("tls_verify;0")
         return "|".join(opts)
 
     def open(self):
