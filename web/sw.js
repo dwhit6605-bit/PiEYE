@@ -1,6 +1,8 @@
-// App-shell cache so the PWA installs and opens instantly. API + snapshots are
-// always fetched live (never cached) so events/live view stay fresh.
-const CACHE = "pv-shell-v4";
+// App-shell caching for offline/installability. The shell is NETWORK-FIRST so an
+// update on the Pi appears on the next load without bumping this version; the
+// cache is only a fallback for when the Pi is unreachable. API responses and
+// snapshots are never cached, so events and the live view are always current.
+const CACHE = "pv-shell-v5";
 const SHELL = ["/", "/index.html", "/styles.css", "/app.js", "/manifest.webmanifest", "/icons/icon.svg"];
 
 self.addEventListener("install", (e) => {
@@ -47,14 +49,24 @@ self.addEventListener("notificationclick", (e) => {
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET") return;
+  if (url.origin !== self.location.origin) return;
   // never cache dynamic data
   if (url.pathname.startsWith("/api/")) return;
-  // cache-first for the static shell
+
+  // Network-first for the app shell: a `git pull` on the Pi shows up on the next
+  // load without needing a cache-version bump. The cache is only a fallback for
+  // when the Pi is unreachable.
   e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
-      const copy = res.clone();
-      caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
-      return res;
-    }).catch(() => hit))
+    fetch(e.request)
+      .then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        }
+        return res;
+      })
+      // Scope the offline fallback to the CURRENT cache -- a bare caches.match()
+      // searches every cache and could resurrect a previous version's code.
+      .catch(() => caches.open(CACHE).then((c) => c.match(e.request)))
   );
 });

@@ -501,6 +501,16 @@ async function boot() {
   route();
   pollHealth();
   setInterval(pollHealth, 5000);
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+  if ("serviceWorker" in navigator) {
+    // When a new service worker takes control (i.e. the app was updated on the
+    // Pi), reload once so the fresh code is actually running.
+    let reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloading) return;
+      reloading = true;
+      location.reload();
+    });
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
 }
 boot();
